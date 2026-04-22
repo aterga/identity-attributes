@@ -1,0 +1,5 @@
+.mops/
+.dfx/
+node_modules/
+.DS_Store
+*.wasm
