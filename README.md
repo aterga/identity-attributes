@@ -1,4 +1,4 @@
-# ii-attributes
+# identity-attributes
 
 A small, auditable Motoko library for consuming **Internet Identity
 certified attribute bundles** (email, name, …) from a relying-party (RP)
@@ -23,7 +23,7 @@ reinvent:
 ```toml
 # mops.toml
 [dependencies]
-ii-attributes = "0.1.0"
+identity-attributes = "0.1.0"
 core          = "2.5.0"
 ```
 
@@ -35,7 +35,7 @@ Also set the trusted signer via the `trusted_attribute_signers` env var
 ### Informational — display a name
 
 ```motoko
-import II "mo:ii-attributes";
+import II "mo:identity-attributes";
 
 actor {
   public shared ({ caller }) func greet() : async Text {
@@ -61,8 +61,8 @@ The Authorization tier binds attributes to *this* canister (origin check),
 *this* request (nonce check), and a fresh time window.
 
 ```motoko
-import II       "mo:ii-attributes";
-import Challenges "mo:ii-attributes/Challenges";
+import II       "mo:identity-attributes";
+import Challenges "mo:identity-attributes/Challenges";
 
 actor {
   stable var nonces = Challenges.empty();

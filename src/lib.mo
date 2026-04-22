@@ -4,11 +4,11 @@ import I "./Implicit";
 import C "./Challenges";
 import Vr "./Verify";
 
-/// Umbrella module. `import II "mo:ii-attributes"` and reach for
+/// Umbrella module. `import II "mo:identity-attributes"` and reach for
 /// `II.verify`, `II.Challenges.*`, `II.Attributes.*`, etc.
 ///
 /// Submodules can also be imported individually:
-///   `import Verify "mo:ii-attributes/Verify";`
+///   `import Verify "mo:identity-attributes/Verify";`
 module {
   public type Value      = V.Value;
   public type Attributes = A.Attributes;

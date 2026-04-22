@@ -1,5 +1,5 @@
 [package]
-name = "ii-attributes"
+name = "identity-attributes"
 version = "0.1.0"
 description = "Higher-level helpers for consuming Internet Identity certified attributes in Motoko canisters."
 keywords = ["internet-identity", "icrc-3", "identity", "attributes", "icp"]
