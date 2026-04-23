@@ -110,5 +110,82 @@ cd demos/bagel
 mops install
 dfx start --clean --background
 dfx deploy bagel
-cd frontend && npm install && npm run dev
+
+# Point the canister at your locally-deployed II (see ../../../internet-identity
+# for how to spin one up), then set the trusted signer:
+dfx canister call aaaaa-aa update_settings "(record {
+  canister_id = principal \"$(dfx canister id bagel)\";
+  settings = record {
+    environment_variables = opt vec {
+      record {
+        name  = \"trusted_attribute_signers\";
+        value = \"rdmx6-jaaaa-aaaaa-aaadq-cai\";
+      }
+    };
+  };
+})"
+
+cd frontend
+cp .env.example .env.local
+# edit .env.local — set VITE_BAGEL_CANISTER_ID to the id dfx just printed
+npm install && npm run dev
 ```
+
+## Deploying to mainnet
+
+Everything here works today *except* the final ingress-attachment step —
+`join_round` will reject with `#Verify(#NoAttributes)` until agent-js
+ships a `sender_info` hook. All the deployment plumbing is in place so
+that once it does, only the frontend needs a bump.
+
+1. **Pick the frontend origin.** Edit [`src/Main.mo:23`](src/Main.mo:23)
+   (`rpOrigin`) to whatever your deployed frontend will serve from —
+   either `https://<bagel_frontend-id>.icp0.io` or your custom domain.
+   This is checked against `implicit:origin` and has to match exactly.
+
+2. **Create the canisters** (you'll need a cycles wallet — see
+   [the dfx cycles docs](https://internetcomputer.org/docs/building-apps/getting-started/tokens-and-cycles)):
+
+   ```bash
+   dfx canister create --network ic --all
+   ```
+
+3. **Set the trusted signer env var on the bagel canister.** The IC
+   management canister accepts `environment_variables` in its settings;
+   dfx's `update-settings` subcommand doesn't expose that yet, so call
+   the management canister directly:
+
+   ```bash
+   BAGEL=$(dfx canister --network ic id bagel)
+   dfx canister --network ic call aaaaa-aa update_settings "(record {
+     canister_id = principal \"$BAGEL\";
+     settings = record {
+       environment_variables = opt vec {
+         record {
+           name  = \"trusted_attribute_signers\";
+           value = \"rdmx6-jaaaa-aaaaa-aaadq-cai\";
+         }
+       };
+     };
+   })"
+   ```
+
+   `rdmx6-…-aaadq-cai` is the Internet Identity production canister —
+   the only signer `mo:core/CallerAttributes` will trust.
+
+4. **Build the frontend against mainnet.** Create
+   `frontend/.env.production` from `.env.example`, setting:
+
+   ```
+   VITE_BAGEL_CANISTER_ID=<what `dfx canister --network ic id bagel` printed>
+   VITE_IC_HOST=https://icp0.io
+   VITE_II_URL=https://identity.internetcomputer.org
+   ```
+
+5. **Deploy.** `dfx deploy --network ic` builds both canisters and
+   uploads the frontend assets.
+
+6. **Smoke test.** Visit `https://<bagel_frontend-id>.icp0.io`. Sign-in
+   and attribute request work; `join_round` fails with
+   `#Verify(#NoAttributes)` — expected until agent-js lands
+   `sender_info` support.
