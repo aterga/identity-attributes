@@ -14,9 +14,9 @@ do {
   assert nested.0 == ?"openid:https://accounts.google.com";
   assert nested.1 == "email";
 
-  let implicit = KeyParse.split("implicit:origin");
-  assert implicit.0 == ?"implicit";
-  assert implicit.1 == "origin";
+  let impl = KeyParse.split("implicit:origin");
+  assert impl.0 == ?"implicit";
+  assert impl.1 == "origin";
 
   let trailingColon = KeyParse.split("x:");
   assert trailingColon.0 == ?"x";

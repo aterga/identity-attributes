@@ -35,7 +35,7 @@ module {
       case null [];
       case (?arr) arr;
     };
-    Map.add(s, Principal.compare, caller, Array.append(existing, [entry]));
+    Map.add(s, Principal.compare, caller, Array.concat(existing, [entry]));
     nonce
   };
 
