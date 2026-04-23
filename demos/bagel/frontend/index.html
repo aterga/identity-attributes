@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Bagel — pair up for coffee</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        max-width: 640px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      h1 { margin-bottom: 0.25rem; }
+      .tagline { color: #666; margin-top: 0; }
+      .row { display: flex; gap: 0.5rem; margin: 1rem 0; }
+      button {
+        padding: 0.5rem 1rem;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      #log {
+        background: #f4f4f4;
+        padding: 1rem;
+        border-radius: 4px;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 12rem;
+      }
+      .pill {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        border-radius: 999px;
+        background: #eef;
+        font-size: 0.75rem;
+        margin-left: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🥯 Bagel</h1>
+    <p class="tagline">
+      Pair up with another <code>@dfinity.org</code> human for coffee.
+      Gated by Internet Identity's certified attributes.
+    </p>
+    <p>
+      Status: <span id="status">not signed in</span>
+      <span id="principal" class="pill" hidden></span>
+    </p>
+    <div class="row">
+      <button id="signIn">Sign in with II</button>
+      <button id="join" disabled>Join round</button>
+      <button id="match" disabled>My match</button>
+      <button id="reset" disabled>Reset</button>
+    </div>
+    <pre id="log"></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

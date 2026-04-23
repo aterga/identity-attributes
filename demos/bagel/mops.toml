@@ -1,5 +1,5 @@
 [package]
-name = "donut"
+name = "bagel"
 version = "0.1.0"
 description = "Demo canister: pair @dfinity.org users for coffee, gated by Internet Identity certified attributes."
 license = "Apache-2.0"

@@ -6,7 +6,7 @@ import Text       "mo:core/Text";
 import Iter       "mo:core/Iter";
 import Result     "mo:core/Result";
 
-/// Donut — a pairs-you-for-coffee demo, gated to @dfinity.org users via
+/// Bagel — a pairs-you-for-coffee demo, gated to @dfinity.org users via
 /// Internet Identity certified attributes.
 ///
 /// Protocol sketch (see the demo README for the full story):
@@ -18,9 +18,9 @@ import Result     "mo:core/Result";
 ///      reads `email`, checks the @dfinity.org suffix, and either pairs the
 ///      caller with someone already waiting or puts them on the pool.
 ///   5. Caller polls `my_match()` to discover their coffee partner's email.
-persistent actor Donut {
+persistent actor Bagel {
 
-  let rpOrigin : Text        = "https://donut.example.com";
+  let rpOrigin : Text        = "https://bagel.example.com";
   let nonceTtlNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
   let maxAttrAgeNs : Nat     = 5 * 60 * 1_000_000_000;      // 5 min
   let allowedDomain : Text   = "dfinity.org";

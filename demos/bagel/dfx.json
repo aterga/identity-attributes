@@ -1,7 +1,7 @@
 {
   "version": 1,
   "canisters": {
-    "donut": {
+    "bagel": {
       "type": "motoko",
       "main": "src/Main.mo"
     }
