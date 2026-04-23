@@ -3,3 +3,6 @@
 node_modules/
 .DS_Store
 *.wasm
+
+# dfx canister-id env file emitted on build (demo only)
+demos/*/.env

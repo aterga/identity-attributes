@@ -18,16 +18,16 @@ import Result     "mo:core/Result";
 ///      reads `email`, checks the @dfinity.org suffix, and either pairs the
 ///      caller with someone already waiting or puts them on the pool.
 ///   5. Caller polls `my_match()` to discover their coffee partner's email.
-actor Donut {
+persistent actor Donut {
 
-  stable let rpOrigin : Text        = "https://donut.example.com";
-  stable let nonceTtlNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
-  stable let maxAttrAgeNs : Nat     = 5 * 60 * 1_000_000_000;      // 5 min
-  stable let allowedDomain : Text   = "dfinity.org";
+  let rpOrigin : Text        = "https://donut.example.com";
+  let nonceTtlNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
+  let maxAttrAgeNs : Nat     = 5 * 60 * 1_000_000_000;      // 5 min
+  let allowedDomain : Text   = "dfinity.org";
 
-  stable var nonces  = Challenges.empty();
-  stable var pool    = Map.empty<Principal, Text>();
-  stable var matches = Map.empty<Principal, (Principal, Text)>();
+  let nonces  = Challenges.empty();
+  let pool    = Map.empty<Principal, Text>();
+  let matches = Map.empty<Principal, (Principal, Text)>();
 
   public type JoinOutcome = {
     #Waiting;
@@ -94,8 +94,8 @@ actor Donut {
 
   /// Leave the waiting pool and drop any existing pairing.
   public shared ({ caller }) func reset() : async () {
-    Map.remove(pool,    Principal.compare, caller);
-    switch (Map.remove(matches, Principal.compare, caller)) {
+    Map.remove(pool, Principal.compare, caller);
+    switch (Map.take(matches, Principal.compare, caller)) {
       case null {};
       case (?(partner, _)) {
         Map.remove(matches, Principal.compare, partner);

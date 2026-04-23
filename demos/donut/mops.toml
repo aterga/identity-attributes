@@ -6,5 +6,8 @@ license = "Apache-2.0"
 private = true
 
 [dependencies]
-core                = "2.5.0"
-identity-attributes = { path = "../.." }
+core = "2.5.0"
+identity-attributes = "../.."
+
+[toolchain]
+moc = "1.6.0"
