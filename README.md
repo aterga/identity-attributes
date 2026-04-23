@@ -117,6 +117,13 @@ duplicate it.
 | `Challenges`  | Canister-issued single-use nonce store         |
 | `Verify`      | `Policy` + one-shot `verify`                   |
 
+## Demo
+
+[`demos/donut/`](demos/donut/) — a tiny pair-for-coffee canister, gated to
+`@dfinity.org` users via an end-to-end Authorization-tier verify. Useful
+both as a working example and as a sanity check that the library's API
+composes cleanly in a real canister.
+
 ## Test vectors
 
 `test/vectors/icrc3-test-vectors.json` is copied from the Internet

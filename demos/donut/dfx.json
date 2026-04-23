@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "canisters": {
+    "donut": {
+      "type": "motoko",
+      "main": "src/Main.mo"
+    }
+  },
+  "defaults": {
+    "build": {
+      "packtool": "mops sources"
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:4943",
+      "type": "ephemeral"
+    }
+  },
+  "output_env_file": ".env"
+}

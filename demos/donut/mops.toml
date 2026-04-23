@@ -1,0 +1,10 @@
+[package]
+name = "donut"
+version = "0.1.0"
+description = "Demo canister: pair @dfinity.org users for coffee, gated by Internet Identity certified attributes."
+license = "Apache-2.0"
+private = true
+
+[dependencies]
+core                = "2.5.0"
+identity-attributes = { path = "../.." }
