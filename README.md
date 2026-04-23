@@ -119,10 +119,10 @@ duplicate it.
 
 ## Demo
 
-[`demos/donut/`](demos/donut/) — a tiny pair-for-coffee canister, gated to
-`@dfinity.org` users via an end-to-end Authorization-tier verify. Useful
-both as a working example and as a sanity check that the library's API
-composes cleanly in a real canister.
+[`demos/bagel/`](demos/bagel/) — a tiny pair-for-coffee canister, gated to
+`@dfinity.org` users via an end-to-end Authorization-tier verify, with a
+minimal Vite + TS frontend. Useful both as a working example and as a
+sanity check that the library's API composes cleanly in a real canister.
 
 ## Test vectors
 

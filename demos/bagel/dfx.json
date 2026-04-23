@@ -1,9 +1,14 @@
 {
   "version": 1,
   "canisters": {
-    "donut": {
+    "bagel": {
       "type": "motoko",
       "main": "src/Main.mo"
+    },
+    "bagel_frontend": {
+      "type": "assets",
+      "source": ["frontend/dist"],
+      "dependencies": ["bagel"]
     }
   },
   "defaults": {
