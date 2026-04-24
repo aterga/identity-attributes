@@ -25,16 +25,26 @@ bundle.
     (pre-fetched, sits in memory)
 
   --- user clicks "Sign in with II" ---
-  authClient.signIn()  ─────────────────────────────► II opens popup
-                                                      (must happen *sync*
-                                                       inside the click)
-  authClient.requestAttributes({
-    keys:  ["sso:dfinity.org:email"],
-    nonce  // pre-fetched above
-  }) ───────────────────────────────────────────────► II consent + sign
-                                                       (piggy-backs on the
-                                                        already-open channel)
-  ◄─────────────────────────────── SignedAttributes { data, signature }
+  signer.openChannel()  ────────────────────────────► II opens popup
+                                                      (window.open runs
+                                                       *sync* inside the
+                                                       click gesture)
+
+  Promise.all([
+    signer.requestDelegation({ publicKey, maxTTL }),   ─► icrc34_delegation
+    signer.sendRequest({                               ─► ii-icrc3-attributes
+      method: "ii-icrc3-attributes",
+      params: { keys: ["sso:dfinity.org:email"],
+                nonce }  // pre-fetched above
+    }),
+  ])                                                   II consent + sign
+                                                       (both requests share
+                                                        the same popup)
+  ◄──── DelegationChain  +  SignedAttributes { data, signature }
+
+  signer.closeChannel()    // explicit — autoClose is off so the popup
+                           // doesn't close mid-flow after the delegation
+                           // response.
 
   wrap in AttributesIdentity
   call join_round() ───────────►
@@ -103,18 +113,33 @@ It exposes:
 
 - An **II-instance toggle** at the top (production `id.ai` vs beta
   `beta.id.ai`) — the choice is stored in `localStorage` and the page
-  reloads when it changes, so the pre-built `AuthClient` always talks
-  to the instance you selected.
+  reloads when it changes, so the pre-built `Signer` always talks to
+  the instance you selected.
 - Three buttons — **Sign in with II**, **Join round**, **My match** —
   plus a **Reset** escape hatch.
 - A live log that shows every step (pre-fetched nonce, decoded
   attributes, canister response) so you can watch the protocol execute.
 
-On page load the frontend pre-builds the `AuthClient` and kicks off a
-`generate_nonce()` fetch, so the click handler for **Sign in with II**
-can call `authClient.signIn()` with zero blocking awaits in front of
-it — otherwise the browser treats the eventual `window.open` as
+On page load the frontend pre-builds the `Signer` (with
+`PostMessageTransport` pointed at the selected II) and kicks off a
+`generate_nonce()` fetch, so the click handler can call
+`signer.openChannel()` with zero blocking awaits in front of it —
+otherwise the browser treats the eventual `window.open` as
 programmatically-initiated and blocks the popup.
+
+We drive the `Signer` directly rather than going through
+[`@icp-sdk/auth`](https://js.icp.build/auth/)'s `AuthClient`. Both
+`icrc34_delegation` (sign in) and `ii-icrc3-attributes` (consent to
+share the email bundle) have to share one popup, and `AuthClient`
+leaves the Signer's default `autoCloseTransportChannel: true` in
+place — which schedules a 200 ms channel-close timer after every
+response. The delegation response arrives first; the user then takes
+seconds to approve the attribute-consent screen; the 200 ms timer
+closes the popup in between and the pending `ii-icrc3-attributes`
+promise rejects with *"Channel was closed before a response was
+received"*. Constructing the `Signer` ourselves with
+`autoCloseTransportChannel: false` keeps the channel alive until we
+explicitly call `closeChannel()` after both responses land.
 
 ## What's deliberately missing
 
@@ -211,11 +236,12 @@ so `icp deploy` sets it for you — no separate management-canister call.
 6. **Smoke test.** Visit `https://<bagel_frontend-id>.icp0.io`.
    Use the **II instance** dropdown at the top to pick production
    (`id.ai`, default) or beta (`beta.id.ai`) — the page reloads so the
-   pre-built `AuthClient` talks to the right endpoint. Sign-in opens
-   II once and returns both a delegation and a signed
-   `sso:dfinity.org:email` bundle. `join_round` rides on an
-   `AttributesIdentity` wrapper (from `@icp-sdk/core/identity`), which
-   attaches the signed bundle as `sender_info` on the outgoing ingress
-   call; the canister then verifies origin + nonce + freshness and
-   pairs you with another `@dfinity.org` human (or puts you on the
-   pool). Open the page in two browsers to see the pairing.
+   pre-built `Signer` talks to the right endpoint. Sign-in opens II
+   once and returns both a delegation and a signed
+   `sso:dfinity.org:email` bundle on the same popup channel.
+   `join_round` rides on an `AttributesIdentity` wrapper (from
+   `@icp-sdk/core/identity`), which attaches the signed bundle as
+   `sender_info` on the outgoing ingress call; the canister then
+   verifies origin + nonce + freshness and pairs you with another
+   `@dfinity.org` human (or puts you on the pool). Open the page in
+   two browsers to see the pairing.
