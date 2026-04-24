@@ -114,15 +114,30 @@ async function signIn() {
 
   // 2. One popup, two requests. @icp-sdk/auth's Signer batches these so
   //    the user sees a single II interaction.
-  log("→ opening II for signIn + requestAttributes(keys: [email])");
+  //
+  //    We request `sso:dfinity.org:email` specifically (not bare `email`):
+  //    it's the scoped key that's authoritatively verified by the
+  //    @dfinity.org SSO provider, so the canister can trust the domain
+  //    without a separate `isAllowed()` check. The Motoko library's
+  //    scope-fallback lookup (`II.getText(attrs, "email")`) picks it up
+  //    either way.
+  //
+  //    `Promise.all` (rather than two sequential awaits) guarantees that
+  //    if `signIn` rejects, `requestAttributes`'s eventual settlement is
+  //    still observed — no unhandled-rejection warning.
+  log(
+    "→ opening II for signIn + requestAttributes(keys: [sso:dfinity.org:email])",
+  );
   const signInPromise = authClient.signIn();
   const attributesPromise = authClient.requestAttributes({
-    keys: ["email"],
+    keys: ["sso:dfinity.org:email"],
     nonce,
   });
 
-  await signInPromise;
-  const { data, signature } = await attributesPromise;
+  const [, { data, signature }] = await Promise.all([
+    signInPromise,
+    attributesPromise,
+  ]);
   log("  delegation: ok");
   log("  attributes.data.len:", data.length);
   log("  attributes.signature.len:", signature.length);

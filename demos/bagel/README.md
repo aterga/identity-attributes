@@ -185,7 +185,11 @@ that once it does, only the frontend needs a bump.
 5. **Deploy.** `dfx deploy --network ic` builds both canisters and
    uploads the frontend assets.
 
-6. **Smoke test.** Visit `https://<bagel_frontend-id>.icp0.io`. Sign-in
-   and attribute request work; `join_round` fails with
-   `#Verify(#NoAttributes)` — expected until agent-js lands
-   `sender_info` support.
+6. **Smoke test.** Visit `https://<bagel_frontend-id>.icp0.io`.
+   Sign-in opens II once and returns both a delegation and a signed
+   `sso:dfinity.org:email` bundle. `join_round` rides on an
+   `AttributesIdentity` wrapper (from `@icp-sdk/core/identity`), which
+   attaches the signed bundle as `sender_info` on the outgoing ingress
+   call; the canister then verifies origin + nonce + freshness and
+   pairs you with another `@dfinity.org` human (or puts you on the
+   pool). Open the page in two browsers to see the pairing.
