@@ -20,7 +20,7 @@ import Result     "mo:core/Result";
 ///   5. Caller polls `my_match()` to discover their coffee partner's email.
 persistent actor Bagel {
 
-  let rpOrigin : Text        = "https://bagel.example.com";
+  let rpOrigin : Text        = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
   let nonceTtlNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
   let maxAttrAgeNs : Nat     = 5 * 60 * 1_000_000_000;      // 5 min
   let allowedDomain : Text   = "dfinity.org";
