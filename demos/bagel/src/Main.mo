@@ -10,7 +10,8 @@ import Result     "mo:core/Result";
 /// Internet Identity certified attributes.
 ///
 /// Protocol sketch (see the demo README for the full story):
-///   1. Frontend calls `generate_nonce()` → 32-byte nonce.
+///   1. Frontend calls `generate_nonce()` (anonymously, on page load) →
+///      32-byte nonce.
 ///   2. Frontend opens II with `requestAttributes({ keys: ["email"], nonce })`.
 ///   3. Frontend wraps the returned `SignedAttributes` into an
 ///      `AttributesIdentity` and calls `join_round()`.
@@ -18,12 +19,27 @@ import Result     "mo:core/Result";
 ///      reads `email`, checks the @dfinity.org suffix, and either pairs the
 ///      caller with someone already waiting or puts them on the pool.
 ///   5. Caller polls `my_match()` to discover their coffee partner's email.
+///
+/// Nonce principal note:
+/// `Challenges.Store` is keyed by `Principal`, but we don't want the nonce
+/// to be tied to a specific caller — the frontend pre-fetches it on page
+/// load (before sign-in, so with an anonymous agent), then the *authenticated*
+/// agent consumes it via `join_round`. To make lookup symmetric we issue
+/// *and* consume under `Principal.anonymous()` — see `anonNonceKey` below.
+/// Replay is still prevented because:
+///   (a) the nonce is single-use (`Challenges.consume` removes on match),
+///   (b) the II signature binds the nonce to the delegated user, so an
+///       attacker can't reuse someone else's bundle.
 persistent actor Bagel {
 
   let rpOrigin : Text        = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
   let nonceTtlNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
   let maxAttrAgeNs : Nat     = 5 * 60 * 1_000_000_000;      // 5 min
   let allowedDomain : Text   = "dfinity.org";
+
+  // Nonces are canister-global (see module doc) — stored under and
+  // consumed against the anonymous principal, regardless of who's calling.
+  let anonNonceKey = Principal.anonymous();
 
   let nonces  = Challenges.empty();
   let pool    = Map.empty<Principal, Text>();
@@ -42,8 +58,11 @@ persistent actor Bagel {
 
   /// Step 1 of every round: give the frontend a canister-issued nonce that
   /// will later be matched against `implicit:nonce` in the attribute bundle.
-  public shared ({ caller }) func generate_nonce() : async Blob {
-    await Challenges.issue<system>(nonces, caller, nonceTtlNs)
+  /// Safe to call anonymously — the frontend fetches this on page load,
+  /// before the user signs in with II. The nonce is stored globally
+  /// (see module doc) so the authenticated consumer can still find it.
+  public func generate_nonce() : async Blob {
+    await Challenges.issue<system>(nonces, anonNonceKey, nonceTtlNs)
   };
 
   /// Step 3: join (or re-join) the current round. Returns `#Paired` if a
@@ -55,7 +74,11 @@ persistent actor Bagel {
         expectedOrigin = rpOrigin;
         maxAgeNs       = maxAttrAgeNs;
       };
-      caller;
+      // `caller` in the verify config is used *only* to look up the nonce
+      // in the store; everything else (origin, freshness, attribute decode)
+      // is caller-agnostic. We pass `anonNonceKey` to match how
+      // `generate_nonce` issued it.
+      caller = anonNonceKey;
       nonces = ?nonces;
     })) {
       case (#err e) { return #err(#Verify e) };

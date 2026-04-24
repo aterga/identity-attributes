@@ -1,5 +1,5 @@
-// Matches the canister's generated .did — see
-// demos/bagel/.dfx/local/canisters/bagel/bagel.did
+// Matches the canister's generated .did — produced during `icp deploy`
+// (was `dfx deploy`'s `.dfx/local/canisters/bagel/bagel.did`).
 export type VerifyError =
   | { NoAttributes: null }
   | { MalformedCandid: null }

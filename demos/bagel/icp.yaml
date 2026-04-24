@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v0.1.0/docs/schemas/icp-yaml-schema.json
+#
+# icp-cli project config (replaces the old dfx.json). See
+# https://cli.internetcomputer.org/0.2/ for the full reference.
+#
+# Build:  icp deploy                 (local)
+#         icp deploy -e ic           (mainnet)
+#
+# Call:   icp canister call bagel generate_nonce
+#         icp canister call bagel pool_size -e ic
+
+canisters:
+  # --- Bagel backend — the identity-attributes gated pair-for-coffee actor.
+  - name: bagel
+    build:
+      steps:
+        - type: script
+          commands:
+            - command -v mops >/dev/null 2>&1 || { echo >&2 "'mops' not found on PATH. Install: https://mops.one/docs/install"; exit 1; }
+            - mops install
+            # mops `sources` emits the `--package` flags for every transitive
+            # dependency; we feed them straight into moc. The -o path is
+            # provided by icp-cli as $ICP_WASM_OUTPUT_PATH.
+            - $(mops toolchain bin moc) src/Main.mo $(mops sources) -o "$ICP_WASM_OUTPUT_PATH"
+
+    settings:
+      # Trusted signer for ICRC-3 certified attribute bundles. Without this,
+      # the IC's ingress layer strips `sender_info` before it reaches the
+      # canister and `II.verify<system>` returns `#NoAttributes`.
+      #
+      # `rdmx6-jaaaa-aaaaa-aaadq-cai` is the Internet Identity production
+      # canister — the only signer `mo:core/CallerAttributes` will trust.
+      environment_variables:
+        trusted_attribute_signers: rdmx6-jaaaa-aaaaa-aaadq-cai
+
+  # --- Bagel frontend — Vite+TypeScript app served from an asset canister.
+  - name: bagel_frontend
+    build:
+      steps:
+        # Pin a specific asset-canister WASM from the dfinity/sdk repo.
+        # Bump when you want newer asset-canister features.
+        - type: pre-built
+          url: https://github.com/dfinity/sdk/raw/89243f2268b6d0ec77d589b7b1b27af931f70edd/src/distributed/assetstorage.wasm.gz
+          sha256: b312a16c3179cf8384afa852e468c1333b7439d4c5a39f26df69b12320f629f8
+        - type: script
+          commands:
+            - (cd frontend && npm ci)
+            - (cd frontend && npm run build)
+
+    sync:
+      steps:
+        # `icp deploy` uploads everything under this directory as static
+        # assets after the canister is installed.
+        - type: assets
+          dirs:
+            - frontend/dist
+
+# Local replica (used by `icp network start`).
+networks:
+  - name: local
+    mode: managed
+    gateway:
+      bind: 127.0.0.1
+      port: 4943
+
+# Deployment targets. `-e local` / `-e ic` on `icp deploy`, `icp canister`, …
+environments:
+  - name: local
+    network: local
+    canisters: [bagel, bagel_frontend]
+  - name: ic
+    network: ic
+    canisters: [bagel, bagel_frontend]

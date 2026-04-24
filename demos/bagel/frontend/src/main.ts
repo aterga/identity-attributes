@@ -8,9 +8,9 @@ import { idlFactory, type Bagel, type JoinResult } from "./bagel.did";
 // ---------------------------------------------------------------- config --
 // Internet Identity's canister — the principal whose signature sits on
 // every attribute bundle. The bagel canister's `trusted_attribute_signers`
-// env var must contain this same principal (see README → "Deploying to
-// mainnet"), otherwise the IC's ingress layer will strip `sender_info`
-// before it reaches our Motoko code.
+// env var must contain this same principal (see icp.yaml), otherwise the
+// IC's ingress layer will strip `sender_info` before it reaches our Motoko
+// code.
 const II_CANISTER_ID = "rdmx6-jaaaa-aaaaa-aaadq-cai";
 
 const BAGEL_CANISTER_ID =
@@ -19,20 +19,66 @@ const BAGEL_CANISTER_ID =
 const IC_HOST =
   (import.meta.env.VITE_IC_HOST as string | undefined) ??
   "http://127.0.0.1:4943";
-const II_URL =
-  (import.meta.env.VITE_II_URL as string | undefined) ??
-  "http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943";
 
 const isLocal = IC_HOST.includes("127.0.0.1") || IC_HOST.includes("localhost");
 
+// ----------------------------------------------------- II instance toggle --
+// The production deployment is at https://id.ai, the beta deployment at
+// https://beta.id.ai. For local dev both roles are served from the same
+// replica gateway — we still let the user pick so they can test against
+// a locally-deployed beta II without recompiling.
+type IIInstance = "prod" | "beta";
+
+function defaultII(instance: IIInstance): string {
+  if (isLocal) {
+    return instance === "prod"
+      ? "https://id.ai.localhost:4943"
+      : "https://beta.id.ai.localhost:4943";
+  }
+  return instance === "prod" ? "https://id.ai" : "https://beta.id.ai";
+}
+
+const II_INSTANCE_KEY = "bagel.ii-instance";
+function loadInstance(): IIInstance {
+  const v = localStorage.getItem(II_INSTANCE_KEY);
+  return v === "beta" ? "beta" : "prod";
+}
+function saveInstance(v: IIInstance) {
+  localStorage.setItem(II_INSTANCE_KEY, v);
+}
+
+// Per-instance override via env vars (mostly for CI / custom hosts). When
+// unset, `defaultII` picks the right URL for the current instance + host.
+const II_URL_PROD =
+  (import.meta.env.VITE_II_URL_PROD as string | undefined) ??
+  (import.meta.env.VITE_II_URL as string | undefined) ?? // legacy name
+  defaultII("prod");
+const II_URL_BETA =
+  (import.meta.env.VITE_II_URL_BETA as string | undefined) ??
+  defaultII("beta");
+
+function iiUrlFor(instance: IIInstance): string {
+  return instance === "beta" ? II_URL_BETA : II_URL_PROD;
+}
+
+// AuthClient's `identityProvider` needs to point at II's `/authorize`
+// endpoint — otherwise the opened window lands on the account page and
+// the Signer handshake never fires.
+function identityProviderFor(instance: IIInstance): string {
+  const base = iiUrlFor(instance).replace(/\/+$/, "");
+  return `${base}/authorize`;
+}
+
 // ---------------------------------------------------------------- DOM refs --
-const $status    = document.getElementById("status")!;
-const $principal = document.getElementById("principal")!;
-const $log       = document.getElementById("log")!;
-const $signIn    = document.getElementById("signIn") as HTMLButtonElement;
-const $join      = document.getElementById("join")   as HTMLButtonElement;
-const $match     = document.getElementById("match")  as HTMLButtonElement;
-const $reset     = document.getElementById("reset")  as HTMLButtonElement;
+const $status     = document.getElementById("status")!;
+const $principal  = document.getElementById("principal")!;
+const $log        = document.getElementById("log")!;
+const $signIn     = document.getElementById("signIn") as HTMLButtonElement;
+const $join       = document.getElementById("join")   as HTMLButtonElement;
+const $match      = document.getElementById("match")  as HTMLButtonElement;
+const $reset      = document.getElementById("reset")  as HTMLButtonElement;
+const $iiToggle   = document.getElementById("iiInstance") as HTMLSelectElement;
+const $iiEndpoint = document.getElementById("iiEndpoint")!;
 
 function log(...xs: unknown[]) {
   const line = xs
@@ -74,7 +120,13 @@ function makeActor(agent: HttpAgent): Bagel {
 }
 
 // --------------------------------------------------------------- app state --
+// All three are pre-populated on page load (see `bootstrap` at the bottom).
+// The click handler then runs with zero blocking awaits before it calls
+// `authClient.signIn()`, so the II popup always opens inside the user's
+// click-gesture window. See "popup-blocker" commit for the gory details.
+let iiInstance: IIInstance = loadInstance();
 let authClient: AuthClient | null = null;
+let pendingNonce: Promise<Uint8Array> | null = null;
 let bagel: Bagel | null = null;
 
 function setSignedIn(principalText: string) {
@@ -85,6 +137,14 @@ function setSignedIn(principalText: string) {
   $join.disabled = false;
   $match.disabled = false;
   $reset.disabled = false;
+  // Don't let the user flip II instances while a delegation from the other
+  // one is active — the next requestAttributes would go to a different
+  // popup and confusion ensues.
+  $iiToggle.disabled = true;
+}
+
+function renderEndpoint() {
+  $iiEndpoint.textContent = identityProviderFor(iiInstance);
 }
 
 // -------------------------------------------------------- II sign-in flow --
@@ -99,42 +159,28 @@ function setSignedIn(principalText: string) {
 //     "Signer window should not be opened outside of click handler"
 //   (the error bubbles up from @slide-computer/signer-web).
 //
-// So the order is:
-//
-//   1. AuthClient.signIn()                 — popup opens synchronously.
-//   2. (in parallel) anon.generate_nonce() — canister commits to a nonce.
-//   3. AuthClient.requestAttributes(nonce) — rides the same popup session.
-//   4. Wrap the delegation in AttributesIdentity so the signed bundle is
-//      attached as `sender_info` on every subsequent ingress message.
+// So on page load we pre-build the AuthClient and kick off a canister-
+// issued nonce fetch. By the time the user clicks, both are sitting in
+// `authClient` and `pendingNonce`, and the click handler can call
+// `authClient.signIn()` with no await standing between it and the user
+// gesture.
 async function signIn() {
-  log("→ init AuthClient (identityProvider = " + II_URL + ")");
-  if (!authClient) {
-    authClient = new AuthClient({ identityProvider: II_URL });
-  }
+  if (!authClient) throw new Error("AuthClient not initialised yet");
+  if (!pendingNonce) throw new Error("Nonce fetch not started");
 
   // 1. Open the II popup NOW, while we're still inside the user-activation
-  //    window granted by the click handler. Any await before this and the
-  //    browser blocks the window.open that signIn does internally.
+  //    window granted by the click handler.
   log("→ opening II for signIn (sync — inside the click-handler gesture)");
   const signInPromise = authClient.signIn();
 
-  // 2. While the popup is open and the user is interacting with II, fetch
-  //    a canister-issued nonce in parallel. The bundle's `implicit:nonce`
-  //    is baked into the signature and must match something the canister
-  //    has already committed to (Authorization tier of the
-  //    identity-attributes design).
-  log("→ calling generate_nonce() with an anonymous agent");
-  const anonAgent = await makeAgent(new AnonymousIdentity());
-  const bootstrap = makeActor(anonAgent);
-  const nonce = await bootstrap.generate_nonce();
+  // 2. Await the nonce we pre-fetched on page load. If it already resolved,
+  //    this is a microtask; if not, we wait while the popup is already
+  //    open (no user-gesture concern anymore). Either way we haven't
+  //    blocked *before* step 1.
+  const nonce = await pendingNonce;
   log("  nonce:", nonce);
 
   // 3. Queue the attributes request on the already-open signer channel.
-  //    Ordering: we only have a nonce to sign *now*, so this can't run in
-  //    step 1. But the II UI takes seconds and generate_nonce takes
-  //    hundreds of milliseconds, so this is queued well before the user
-  //    completes the dance — both requests ride a single popup session.
-  //
   //    We request `sso:dfinity.org:email` specifically (not bare `email`):
   //    it's the scoped key that's authoritatively verified by the
   //    @dfinity.org SSO provider, so the canister can trust the domain
@@ -222,9 +268,51 @@ $join.addEventListener("click", () => join());
 $match.addEventListener("click", () => myMatch());
 $reset.addEventListener("click", () => reset());
 
+// Flipping the toggle before sign-in changes which II the eventual click
+// will talk to. After sign-in we disable it (see `setSignedIn`). A full
+// reload is the safest way to flush any pre-fetched state tied to the
+// previous instance (auth session, nonce, etc.).
+$iiToggle.addEventListener("change", () => {
+  const next = $iiToggle.value === "beta" ? "beta" : "prod";
+  if (next === iiInstance) return;
+  saveInstance(next);
+  log(`→ switching II instance to ${next} — reloading…`);
+  location.reload();
+});
+
+// ------------------------------------------------------------ bootstrap --
+// Everything we can do before the first click:
+//   1. render the current II endpoint for visibility
+//   2. build the AuthClient (so .signIn() can be called with no `await`
+//      between click and popup — see comment on signIn())
+//   3. kick off generate_nonce() — it lives in `pendingNonce` for the
+//      click handler to await *after* the popup is open.
+$iiToggle.value = iiInstance;
+renderEndpoint();
+
 log(`bagel canister: ${BAGEL_CANISTER_ID}`);
-log(`II URL: ${II_URL}`);
-log(`IC host: ${IC_HOST}`);
+log(`IC host:        ${IC_HOST}`);
+log(`II instance:    ${iiInstance}`);
+log(`II endpoint:    ${identityProviderFor(iiInstance)}`);
+log("");
+
+authClient = new AuthClient({
+  identityProvider: identityProviderFor(iiInstance),
+});
+log("✓ AuthClient initialised (pre-click)");
+
+pendingNonce = (async () => {
+  const anonAgent = await makeAgent(new AnonymousIdentity());
+  const bootstrap = makeActor(anonAgent);
+  const n = await bootstrap.generate_nonce();
+  // `Bagel` IDL returns `Uint8Array`-compatible `Blob`; pin the type so the
+  // downstream `requestAttributes` call sees the right runtime shape.
+  return n as Uint8Array;
+})();
+pendingNonce
+  .then((n) => log("✓ pre-fetched nonce:", n))
+  .catch((e) => log("✗ nonce pre-fetch failed:", String(e)));
+
 log("");
 log("1. Sign in with II — single popup delivers a delegation + a signed");
 log("   email attribute bundle (see @icp-sdk/auth docs).");

@@ -4,5 +4,12 @@ node_modules/
 .DS_Store
 *.wasm
 
-# dfx canister-id env file emitted on build (demo only)
+# canister-id env file emitted on build (demo only — dfx's `output_env_file`)
 demos/*/.env
+
+# icp-cli per-project state. `.icp/data/` holds the mainnet canister-ID
+# mappings and IS committed (see `.icp/data/mappings/ic.ids.json`);
+# everything else under `.icp/` is scratch.
+demos/*/.icp/cache/
+demos/*/.icp/logs/
+demos/*/.icp/identities/

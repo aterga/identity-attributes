@@ -37,6 +37,25 @@
         font-size: 0.75rem;
         margin-left: 0.5rem;
       }
+      .controls {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 1rem 0 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: #fafafa;
+        border: 1px solid #e4e4e4;
+        border-radius: 4px;
+        font-size: 0.85rem;
+      }
+      .controls label { color: #555; }
+      .controls code {
+        background: #eef;
+        padding: 0.05rem 0.35rem;
+        border-radius: 3px;
+        font-size: 0.8rem;
+      }
     </style>
   </head>
   <body>
@@ -45,6 +64,15 @@
       Pair up with another <code>@dfinity.org</code> human for coffee.
       Gated by Internet Identity's certified attributes.
     </p>
+    <div class="controls">
+      <label for="iiInstance">II instance:</label>
+      <select id="iiInstance">
+        <option value="prod">production (id.ai)</option>
+        <option value="beta">beta (beta.id.ai)</option>
+      </select>
+      <span>→</span>
+      <code id="iiEndpoint"></code>
+    </div>
     <p>
       Status: <span id="status">not signed in</span>
       <span id="principal" class="pill" hidden></span>
