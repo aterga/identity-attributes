@@ -1,7 +1,12 @@
 import { Actor, AnonymousIdentity, HttpAgent } from "@icp-sdk/core/agent";
-import { AttributesIdentity } from "@icp-sdk/core/identity";
+import {
+  AttributesIdentity,
+  DelegationIdentity,
+  Ed25519KeyIdentity,
+} from "@icp-sdk/core/identity";
 import { Principal } from "@icp-sdk/core/principal";
-import { AuthClient } from "@icp-sdk/auth/client";
+import { Signer } from "@icp-sdk/signer";
+import { PostMessageTransport } from "@icp-sdk/signer/web";
 
 import { idlFactory, type Bagel, type JoinResult } from "./bagel.did";
 
@@ -61,12 +66,38 @@ function iiUrlFor(instance: IIInstance): string {
   return instance === "beta" ? II_URL_BETA : II_URL_PROD;
 }
 
-// AuthClient's `identityProvider` needs to point at II's `/authorize`
+// The `PostMessageTransport.url` needs to point at II's `/authorize`
 // endpoint — otherwise the opened window lands on the account page and
-// the Signer handshake never fires.
+// the ICRC-29 heartbeat handshake never fires.
 function identityProviderFor(instance: IIInstance): string {
   const base = iiUrlFor(instance).replace(/\/+$/, "");
   return `${base}/authorize`;
+}
+
+// 8-hour delegation lifetime — same default as `@icp-sdk/auth`'s AuthClient.
+const MAX_TIME_TO_LIVE_NS = 8n * 60n * 60n * 1_000_000_000n;
+
+// Uint8Array ⇄ base64 (the JSON-RPC `ii-icrc3-attributes` payload wraps the
+// nonce in a base64 string). `Uint8Array.prototype.toBase64` is the tc39
+// proposal; fall back to `btoa`/`atob` on older engines. Copied from
+// `@icp-sdk/auth`'s internal helpers.
+function toBase64(bytes: Uint8Array): string {
+  const maybe = bytes as Uint8Array & { toBase64?: () => string };
+  if (typeof maybe.toBase64 === "function") return maybe.toBase64();
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++)
+    binary += String.fromCharCode(bytes[i]);
+  return globalThis.btoa(binary);
+}
+function fromBase64(str: string): Uint8Array {
+  const Ctor = Uint8Array as typeof Uint8Array & {
+    fromBase64?: (s: string) => Uint8Array;
+  };
+  if (typeof Ctor.fromBase64 === "function") return Ctor.fromBase64(str);
+  const binary = globalThis.atob(str);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
 }
 
 // ---------------------------------------------------------------- DOM refs --
@@ -122,10 +153,10 @@ function makeActor(agent: HttpAgent): Bagel {
 // --------------------------------------------------------------- app state --
 // All three are pre-populated on page load (see `bootstrap` at the bottom).
 // The click handler then runs with zero blocking awaits before it calls
-// `authClient.signIn()`, so the II popup always opens inside the user's
+// `signer.openChannel()`, so the II popup always opens inside the user's
 // click-gesture window. See "popup-blocker" commit for the gory details.
 let iiInstance: IIInstance = loadInstance();
-let authClient: AuthClient | null = null;
+let signer: Signer<PostMessageTransport> | null = null;
 let pendingNonce: Promise<Uint8Array> | null = null;
 let bagel: Bagel | null = null;
 
@@ -148,79 +179,129 @@ function renderEndpoint() {
 }
 
 // -------------------------------------------------------- II sign-in flow --
-// This follows the official pattern from https://github.com/dfinity/icp-js-auth
-// (see the "Requesting Identity Attributes" section), with one subtlety
-// that the README example glosses over:
+// Two constraints collide in this handler:
 //
-//   AuthClient.signIn() has to run *before* any `await`. Under the hood it
-//   opens the II popup via window.open, which browsers only permit while
-//   the user-activation gesture from the click is still live. Slip even a
-//   quick HttpAgent.create() in first and Chrome throws
-//     "Signer window should not be opened outside of click handler"
-//   (the error bubbles up from @slide-computer/signer-web).
+//   (a) `window.open` (inside PostMessageTransport.establishChannel) has to
+//       run synchronously inside the click gesture. Any `await` before it
+//       and Chrome flags the eventual open as programmatic → popup blocker:
+//         "Signer window should not be opened outside of click handler".
+//       So the Signer and the nonce are pre-built on page load and the
+//       click handler hits `signer.openChannel()` with zero awaits.
 //
-// So on page load we pre-build the AuthClient and kick off a canister-
-// issued nonce fetch. By the time the user clicks, both are sitting in
-// `authClient` and `pendingNonce`, and the click handler can call
-// `authClient.signIn()` with no await standing between it and the user
-// gesture.
+//   (b) The two JSON-RPC calls we want — `icrc34_delegation` and
+//       `ii-icrc3-attributes` — have to share one popup. The Signer's
+//       default `autoCloseTransportChannel: true` schedules a 200ms close
+//       timer *after each response*, so once the delegation response
+//       arrives the clock starts ticking — and the user has longer than
+//       200ms to read + approve the attribute-consent screen. When the
+//       timer fires, `channel.close()` closes the popup and the pending
+//       `ii-icrc3-attributes` promise rejects with
+//         "Channel was closed before a response was received".
+//       `@icp-sdk/auth`'s AuthClient hard-codes the default and doesn't
+//       expose the option, which is why we drive the Signer directly
+//       instead. Auto-close is OFF; we `closeChannel()` ourselves in a
+//       `finally` after *both* responses are in (or the flow failed).
 async function signIn() {
-  if (!authClient) throw new Error("AuthClient not initialised yet");
+  if (!signer) throw new Error("Signer not initialised yet");
   if (!pendingNonce) throw new Error("Nonce fetch not started");
 
   // 1. Open the II popup NOW, while we're still inside the user-activation
-  //    window granted by the click handler.
-  log("→ opening II for signIn (sync — inside the click-handler gesture)");
-  const signInPromise = authClient.signIn();
+  //    window granted by the click. `openChannel()` calls `window.open`
+  //    synchronously before its first `await`, so kicking it off without
+  //    awaiting is enough to hand the gesture to the popup.
+  log("→ opening II popup (sync — inside the click-handler gesture)");
+  const channelPromise = signer.openChannel();
 
-  // 2. Await the nonce we pre-fetched on page load. If it already resolved,
-  //    this is a microtask; if not, we wait while the popup is already
-  //    open (no user-gesture concern anymore). Either way we haven't
-  //    blocked *before* step 1.
+  // 2. Await the nonce we pre-fetched on page load. If it already
+  //    resolved, this is a microtask; the popup is already opening.
   const nonce = await pendingNonce;
   log("  nonce:", nonce);
 
-  // 3. Queue the attributes request on the already-open signer channel.
-  //    We request `sso:dfinity.org:email` specifically (not bare `email`):
-  //    it's the scoped key that's authoritatively verified by the
-  //    @dfinity.org SSO provider, so the canister can trust the domain
-  //    without a separate `isAllowed()` check. The Motoko library's
-  //    scope-fallback lookup (`II.getText(attrs, "email")`) picks it up
-  //    either way.
-  log("→ requestAttributes(keys: [sso:dfinity.org:email])");
-  const attributesPromise = authClient.requestAttributes({
-    keys: ["sso:dfinity.org:email"],
-    nonce,
-  });
+  // 3. Fresh session key per sign-in. Ed25519 is simpler than ECDSA for a
+  //    demo (private key lives in-process, no separate PartialDelegation
+  //    signer to manage). II signs a delegation chain for this pubkey;
+  //    every outgoing canister call is then signed with the Ed25519 key.
+  const sessionKey = Ed25519KeyIdentity.generate();
 
-  //    `Promise.all` (rather than two sequential awaits) guarantees that
-  //    if one rejects, the other's eventual settlement is still observed —
-  //    no unhandled-rejection warning.
-  const [, { data, signature }] = await Promise.all([
-    signInPromise,
-    attributesPromise,
-  ]);
-  log("  delegation: ok");
-  log("  attributes.data.len:", data.length);
-  log("  attributes.signature.len:", signature.length);
+  try {
+    // 4. Wait for the ICRC-29 heartbeat handshake before firing requests.
+    //    Not strictly needed — `sendRequest` / `requestDelegation`
+    //    `openChannel` internally too — but the explicit `await` makes
+    //    the error path (handshake timeout) clearer.
+    await channelPromise;
 
-  // 4. Wrap the inner (Delegation)Identity with AttributesIdentity. This
-  //    is the piece that was missing from the @slide-computer/signer flow
-  //    we started with — without it, the bundle never reaches the canister
-  //    and `II.verify<system>` fails with `#NoAttributes`.
-  const inner = await authClient.getIdentity();
-  const identity = new AttributesIdentity({
-    inner,
-    attributes: { data, signature },
-    signer: { canisterId: Principal.fromText(II_CANISTER_ID) },
-  });
+    // 5. Fire both JSON-RPC requests in parallel. II processes them
+    //    sequentially inside the same popup — sign-in prompt first, then
+    //    the attribute-consent screen — but queuing the second request
+    //    up front means the Signer has an active pending `sendRequest`
+    //    at the moment the delegation response arrives, which is what
+    //    keeps the channel alive (see `autoCloseTransportChannel: false`
+    //    on the Signer below).
+    //
+    //    We request `sso:dfinity.org:email` specifically (not bare
+    //    `email`): it's the scoped key that's authoritatively verified
+    //    by the @dfinity.org SSO provider, so the canister can trust
+    //    the domain without a separate `isAllowed()` check. The Motoko
+    //    library's scope-fallback lookup (`II.getText(attrs, "email")`)
+    //    picks it up either way.
+    log("→ icrc34_delegation + ii-icrc3-attributes (parallel, same popup)");
+    const [delegationChain, attrsResponse] = await Promise.all([
+      signer.requestDelegation({
+        publicKey: sessionKey.getPublicKey(),
+        maxTimeToLive: MAX_TIME_TO_LIVE_NS,
+      }),
+      signer.sendRequest({
+        jsonrpc: "2.0",
+        id: crypto.randomUUID(),
+        method: "ii-icrc3-attributes",
+        params: {
+          keys: ["sso:dfinity.org:email"],
+          nonce: toBase64(nonce),
+        },
+      }),
+    ]);
+    log("  delegation: ok");
 
-  const agent = await makeAgent(identity);
-  bagel = makeActor(agent);
+    if ("error" in attrsResponse) {
+      throw new Error(
+        `ii-icrc3-attributes error ${attrsResponse.error.code}: ${attrsResponse.error.message}`,
+      );
+    }
+    const result = attrsResponse.result as
+      | { data?: unknown; signature?: unknown }
+      | undefined;
+    if (typeof result?.data !== "string" || typeof result?.signature !== "string") {
+      throw new Error(
+        "ii-icrc3-attributes: response missing `data` or `signature`",
+      );
+    }
+    const data = fromBase64(result.data);
+    const signature = fromBase64(result.signature);
+    log("  attributes.data.len:", data.length);
+    log("  attributes.signature.len:", signature.length);
 
-  const p = inner.getPrincipal().toText();
-  setSignedIn(p);
-  log("  signed in as", p);
+    // 6. Wrap the DelegationIdentity with AttributesIdentity — this is
+    //    what injects `sender_info` on every outgoing request, letting
+    //    the bagel canister's `II.verify<system>` see the signed bundle.
+    const inner = DelegationIdentity.fromDelegation(sessionKey, delegationChain);
+    const identity = new AttributesIdentity({
+      inner,
+      attributes: { data, signature },
+      signer: { canisterId: Principal.fromText(II_CANISTER_ID) },
+    });
+
+    const agent = await makeAgent(identity);
+    bagel = makeActor(agent);
+
+    const p = inner.getPrincipal().toText();
+    setSignedIn(p);
+    log("  signed in as", p);
+  } finally {
+    // 7. Auto-close is off, so it's on us to close the popup — both on
+    //    the happy path and if anything above threw. `closeChannel` is
+    //    a no-op if the channel never opened (e.g. user dismissed II).
+    await signer.closeChannel();
+  }
 }
 
 // --------------------------------------------------------- canister calls --
@@ -283,8 +364,11 @@ $iiToggle.addEventListener("change", () => {
 // ------------------------------------------------------------ bootstrap --
 // Everything we can do before the first click:
 //   1. render the current II endpoint for visibility
-//   2. build the AuthClient (so .signIn() can be called with no `await`
-//      between click and popup — see comment on signIn())
+//   2. build the Signer + PostMessageTransport (so `signer.openChannel()`
+//      can be called with no `await` between click and `window.open` —
+//      see comment on signIn()). Crucially, `autoCloseTransportChannel`
+//      is disabled here so the channel survives between the delegation
+//      response and the attribute-consent screen (see comment on signIn()).
 //   3. kick off generate_nonce() — it lives in `pendingNonce` for the
 //      click handler to await *after* the popup is open.
 $iiToggle.value = iiInstance;
@@ -296,10 +380,20 @@ log(`II instance:    ${iiInstance}`);
 log(`II endpoint:    ${identityProviderFor(iiInstance)}`);
 log("");
 
-authClient = new AuthClient({
-  identityProvider: identityProviderFor(iiInstance),
+signer = new Signer({
+  transport: new PostMessageTransport({
+    url: identityProviderFor(iiInstance),
+  }),
+  // Default is `true` with a 200 ms timer after each response. With two
+  // requests on the same popup (icrc34_delegation + ii-icrc3-attributes),
+  // the delegation response fires the timer while the user is still
+  // reading the attribute-consent screen — the timer closes the popup
+  // and the attributes request rejects with "Channel was closed".
+  // We turn auto-close off and call `closeChannel` ourselves in
+  // `signIn`'s finally.
+  autoCloseTransportChannel: false,
 });
-log("✓ AuthClient initialised (pre-click)");
+log("✓ Signer initialised (pre-click, auto-close disabled)");
 
 pendingNonce = (async () => {
   const anonAgent = await makeAgent(new AnonymousIdentity());
@@ -315,7 +409,8 @@ pendingNonce
 
 log("");
 log("1. Sign in with II — single popup delivers a delegation + a signed");
-log("   email attribute bundle (see @icp-sdk/auth docs).");
+log("   email attribute bundle (icrc34_delegation + ii-icrc3-attributes,");
+log("   both sent on the same Signer channel).");
 log("2. Join round — the wrapped AttributesIdentity attaches the bundle");
 log("   as sender_info; the canister verifies origin + nonce + freshness,");
 log("   then pairs you with another @dfinity.org human.");
