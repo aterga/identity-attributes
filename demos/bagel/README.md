@@ -179,7 +179,7 @@ that once it does, only the frontend needs a bump.
    ```
    VITE_BAGEL_CANISTER_ID=<what `dfx canister --network ic id bagel` printed>
    VITE_IC_HOST=https://icp0.io
-   VITE_II_URL=https://identity.internetcomputer.org
+   VITE_II_URL=https://id.ai
    ```
 
 5. **Deploy.** `dfx deploy --network ic` builds both canisters and
