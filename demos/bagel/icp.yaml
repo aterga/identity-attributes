@@ -14,13 +14,14 @@ canisters:
   - name: bagel
     build:
       steps:
+        # Needs `mops` on PATH — install from https://mops.one/docs/install
+        # if the first command fails with 'mops: command not found'.
+        # mops `sources` emits the `--package` flags for every transitive
+        # dependency; we feed them straight into moc. The -o path is
+        # provided by icp-cli as $ICP_WASM_OUTPUT_PATH.
         - type: script
           commands:
-            - command -v mops >/dev/null 2>&1 || { echo >&2 "'mops' not found on PATH. Install: https://mops.one/docs/install"; exit 1; }
             - mops install
-            # mops `sources` emits the `--package` flags for every transitive
-            # dependency; we feed them straight into moc. The -o path is
-            # provided by icp-cli as $ICP_WASM_OUTPUT_PATH.
             - $(mops toolchain bin moc) src/Main.mo $(mops sources) -o "$ICP_WASM_OUTPUT_PATH"
 
     settings:
