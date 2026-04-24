@@ -1,16 +1,18 @@
-import { Actor, HttpAgent } from "@icp-sdk/core/agent";
-import {
-  DelegationChain,
-  DelegationIdentity,
-  Ed25519KeyIdentity,
-} from "@icp-sdk/core/identity";
-import { Signer } from "@slide-computer/signer";
-import { PostMessageTransport } from "@slide-computer/signer-web";
+import { Actor, AnonymousIdentity, HttpAgent } from "@icp-sdk/core/agent";
+import { AttributesIdentity } from "@icp-sdk/core/identity";
+import { Principal } from "@icp-sdk/core/principal";
+import { AuthClient } from "@icp-sdk/auth/client";
 
 import { idlFactory, type Bagel, type JoinResult } from "./bagel.did";
 
-// Edit these three to match your local deployment (`dfx deploy bagel`
-// writes them to demos/bagel/.env — cat that file and paste).
+// ---------------------------------------------------------------- config --
+// Internet Identity's canister — the principal whose signature sits on
+// every attribute bundle. The bagel canister's `trusted_attribute_signers`
+// env var must contain this same principal (see README → "Deploying to
+// mainnet"), otherwise the IC's ingress layer will strip `sender_info`
+// before it reaches our Motoko code.
+const II_CANISTER_ID = "rdmx6-jaaaa-aaaaa-aaadq-cai";
+
 const BAGEL_CANISTER_ID =
   (import.meta.env.VITE_BAGEL_CANISTER_ID as string | undefined) ??
   "uxrrr-q7777-77774-qaaaq-cai";
@@ -20,6 +22,8 @@ const IC_HOST =
 const II_URL =
   (import.meta.env.VITE_II_URL as string | undefined) ??
   "http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943";
+
+const isLocal = IC_HOST.includes("127.0.0.1") || IC_HOST.includes("localhost");
 
 // ---------------------------------------------------------------- DOM refs --
 const $status    = document.getElementById("status")!;
@@ -48,109 +52,113 @@ function replacer(_key: string, value: unknown) {
   return value;
 }
 
-// --------------------------------------------------------------- app state --
-let identity: DelegationIdentity | null = null;
-let bagel: Bagel | null = null;
-let lastNonce: Uint8Array | null = null;
+// --------------------------------------------------------------- helpers --
+async function makeAgent(identity: {
+  getPrincipal: () => { toText: () => string };
+}): Promise<HttpAgent> {
+  const agent = await HttpAgent.create({
+    host: IC_HOST,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- agent's
+    //   Identity type drifts between sub-packages; runtime shape matches.
+    identity: identity as any,
+    shouldFetchRootKey: isLocal,
+  });
+  return agent;
+}
 
-function setSignedIn(idr: DelegationIdentity) {
-  identity = idr;
-  const p = idr.getPrincipal().toText();
-  $status.textContent = "signed in";
-  $principal.textContent = p.slice(0, 5) + "…" + p.slice(-5);
-  $principal.hidden = false;
-  $signIn.disabled = true;
-  $join.disabled = false;
-  $match.disabled = false;
-  $reset.disabled = false;
-
-  const agent = new HttpAgent({ host: IC_HOST, identity: idr });
-  if (IC_HOST.includes("127.0.0.1") || IC_HOST.includes("localhost")) {
-    agent.fetchRootKey().catch((e) => log("fetchRootKey failed:", String(e)));
-  }
-  bagel = Actor.createActor<Bagel>(idlFactory, {
+function makeActor(agent: HttpAgent): Bagel {
+  return Actor.createActor<Bagel>(idlFactory, {
     agent,
     canisterId: BAGEL_CANISTER_ID,
   });
 }
 
+// --------------------------------------------------------------- app state --
+let authClient: AuthClient | null = null;
+let bagel: Bagel | null = null;
+
+function setSignedIn(principalText: string) {
+  $status.textContent = "signed in";
+  $principal.textContent = principalText.slice(0, 5) + "…" + principalText.slice(-5);
+  $principal.hidden = false;
+  $signIn.disabled = true;
+  $join.disabled = false;
+  $match.disabled = false;
+  $reset.disabled = false;
+}
+
 // -------------------------------------------------------- II sign-in flow --
+// This follows the official pattern from https://github.com/dfinity/icp-js-auth
+// (see the "Requesting Identity Attributes" section):
+//
+//   1. Anonymous agent → backend.generate_nonce()  — canister-sourced nonce.
+//   2. In parallel, AuthClient.signIn() + AuthClient.requestAttributes()
+//      — one II popup delivers both a delegation and the signed bundle.
+//   3. Wrap the session identity in AttributesIdentity so the bundle is
+//      attached as `sender_info` on every subsequent ingress message.
 async function signIn() {
-  log("→ generating session key");
-  const session = Ed25519KeyIdentity.generate();
-
-  // We need a nonce from the canister BEFORE asking II for the attribute
-  // bundle, so that `implicit:nonce` in the signed bundle matches one we've
-  // already committed to. To call the canister we need an identity — so we
-  // use the session identity directly as an anonymous-ish caller.
-  const bootstrapAgent = new HttpAgent({ host: IC_HOST, identity: session });
-  if (IC_HOST.includes("127.0.0.1") || IC_HOST.includes("localhost")) {
-    await bootstrapAgent.fetchRootKey();
+  log("→ init AuthClient (identityProvider = " + II_URL + ")");
+  if (!authClient) {
+    authClient = new AuthClient({ identityProvider: II_URL });
   }
-  const bootstrap = Actor.createActor<Bagel>(idlFactory, {
-    agent: bootstrapAgent,
-    canisterId: BAGEL_CANISTER_ID,
-  });
 
-  log("→ calling generate_nonce()");
+  // 1. Fetch a canister-issued nonce. This has to happen before we ask II
+  //    for the bundle, because the bundle's `implicit:nonce` is baked into
+  //    the signature and must match something the canister has already
+  //    committed to (Authorization tier of the identity-attributes design).
+  log("→ calling generate_nonce() with an anonymous agent");
+  const anonAgent = await makeAgent(new AnonymousIdentity());
+  const bootstrap = makeActor(anonAgent);
   const nonce = await bootstrap.generate_nonce();
-  lastNonce = nonce;
   log("  nonce:", nonce);
 
-  log("→ opening II for delegation + email attribute");
-  const transport = new PostMessageTransport({ url: II_URL });
-  const signer = new Signer({ transport, autoCloseTransportChannel: false });
-
-  const delegationPromise = signer.delegation({
-    publicKey: new Uint8Array(session.getPublicKey().toDer()),
+  // 2. One popup, two requests. @icp-sdk/auth's Signer batches these so
+  //    the user sees a single II interaction.
+  //
+  //    We request `sso:dfinity.org:email` specifically (not bare `email`):
+  //    it's the scoped key that's authoritatively verified by the
+  //    @dfinity.org SSO provider, so the canister can trust the domain
+  //    without a separate `isAllowed()` check. The Motoko library's
+  //    scope-fallback lookup (`II.getText(attrs, "email")`) picks it up
+  //    either way.
+  //
+  //    `Promise.all` (rather than two sequential awaits) guarantees that
+  //    if `signIn` rejects, `requestAttributes`'s eventual settlement is
+  //    still observed — no unhandled-rejection warning.
+  log(
+    "→ opening II for signIn + requestAttributes(keys: [sso:dfinity.org:email])",
+  );
+  const signInPromise = authClient.signIn();
+  const attributesPromise = authClient.requestAttributes({
+    keys: ["sso:dfinity.org:email"],
+    nonce,
   });
 
-  const attrsPromise = signer
-    .sendRequest({
-      jsonrpc: "2.0",
-      method: "ii-icrc3-attributes",
-      id: crypto.randomUUID(),
-      params: {
-        keys: ["email"],
-        // @ts-ignore — Uint8Array.fromBase64/toBase64 lacks TS types yet
-        nonce: nonce.toBase64(),
-      },
-    })
-    .then((response) => {
-      if (
-        !("result" in response) ||
-        typeof response.result !== "object" ||
-        response.result === null ||
-        !("data" in response.result) ||
-        !("signature" in response.result)
-      ) {
-        throw new Error("II returned no icrc3 attributes");
-      }
-      return {
-        // @ts-ignore
-        data: Uint8Array.fromBase64(response.result.data as string),
-        // @ts-ignore
-        signature: Uint8Array.fromBase64(response.result.signature as string),
-      };
-    });
-
-  const [delegation, attrs] = await Promise.all([delegationPromise, attrsPromise]);
-  await signer.closeChannel();
-
+  const [, { data, signature }] = await Promise.all([
+    signInPromise,
+    attributesPromise,
+  ]);
   log("  delegation: ok");
-  log("  attributes.data.len:", attrs.data.length);
-  log("  attributes.signature.len:", attrs.signature.length);
+  log("  attributes.data.len:", data.length);
+  log("  attributes.signature.len:", signature.length);
 
-  // Stash the signed bundle where the agent can (in a future agent-js)
-  // attach it as `sender_info` on outgoing ingress messages. For now we
-  // just keep it on window for inspection.
-  (window as unknown as { _bagelAttrs: unknown })._bagelAttrs = attrs;
+  // 3. Wrap the inner (Delegation)Identity with AttributesIdentity. This
+  //    is the piece that was missing from the @slide-computer/signer flow
+  //    we started with — without it, the bundle never reaches the canister
+  //    and `II.verify<system>` fails with `#NoAttributes`.
+  const inner = await authClient.getIdentity();
+  const identity = new AttributesIdentity({
+    inner,
+    attributes: { data, signature },
+    signer: { canisterId: Principal.fromText(II_CANISTER_ID) },
+  });
 
-  const idr = DelegationIdentity.fromDelegation(
-    session,
-    delegation as unknown as DelegationChain,
-  );
-  setSignedIn(idr);
+  const agent = await makeAgent(identity);
+  bagel = makeActor(agent);
+
+  const p = inner.getPrincipal().toText();
+  setSignedIn(p);
+  log("  signed in as", p);
 }
 
 // --------------------------------------------------------- canister calls --
@@ -167,7 +175,6 @@ function formatJoin(r: JoinResult): string {
 async function join() {
   if (!bagel) return;
   log("→ calling join_round()");
-  if (!lastNonce) log("  (heads up: no nonce issued this session)");
   try {
     const res = await bagel.join_round();
     log("  result:", formatJoin(res));
@@ -203,7 +210,9 @@ log(`bagel canister: ${BAGEL_CANISTER_ID}`);
 log(`II URL: ${II_URL}`);
 log(`IC host: ${IC_HOST}`);
 log("");
-log("1. Sign in with II — fetches a canister nonce, then asks II for");
-log("   a signed email attribute bundle.");
-log("2. Join round — calls the canister's join_round().");
+log("1. Sign in with II — single popup delivers a delegation + a signed");
+log("   email attribute bundle (see @icp-sdk/auth docs).");
+log("2. Join round — the wrapped AttributesIdentity attaches the bundle");
+log("   as sender_info; the canister verifies origin + nonce + freshness,");
+log("   then pairs you with another @dfinity.org human.");
 log("3. My match — polls for the partner's email.");

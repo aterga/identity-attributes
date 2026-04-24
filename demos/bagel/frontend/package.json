@@ -9,9 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@icp-sdk/core": "^4.2.3",
-    "@slide-computer/signer": "^4.2.0",
-    "@slide-computer/signer-web": "^4.2.0"
+    "@icp-sdk/auth": "^6.2.0",
+    "@icp-sdk/core": "^5.3.1"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
