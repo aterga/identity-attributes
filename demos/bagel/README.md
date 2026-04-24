@@ -25,26 +25,25 @@ bundle.
     (pre-fetched, sits in memory)
 
   --- user clicks "Sign in with II" ---
-  signer.openChannel()  ────────────────────────────► II opens popup
-                                                      (window.open runs
-                                                       *sync* inside the
-                                                       click gesture)
+  authClient.signIn({ maxTimeToLive }) ──────────────► II opens popup
+    // window.open runs *sync* inside                  (delegation consent)
+    // the click gesture, before signIn's
+    // first await.
+  ◄─────────────────────────────────── DelegationChain
 
-  Promise.all([
-    signer.requestDelegation({ publicKey, maxTTL }),   ─► icrc34_delegation
-    signer.sendRequest({                               ─► ii-icrc3-attributes
-      method: "ii-icrc3-attributes",
-      params: { keys: ["sso:dfinity.org:email"],
-                nonce }  // pre-fetched above
-    }),
-  ])                                                   II consent + sign
-                                                       (both requests share
-                                                        the same popup)
-  ◄──── DelegationChain  +  SignedAttributes { data, signature }
-
-  signer.closeChannel()    // explicit — autoClose is off so the popup
-                           // doesn't close mid-flow after the delegation
-                           // response.
+  authClient.requestAttributes({                    ─► ii-icrc3-attributes
+    keys: ["sso:dfinity.org:email"],                   (attribute consent
+    nonce,  // pre-fetched above                        on the same popup)
+  })
+    // Called with no awaits between, so the
+    // Signer's 200ms auto-close timer scheduled
+    // after the delegation response is cancelled
+    // by openChannel() at the top of the next
+    // sendRequest — the popup is reused.
+  ◄────────────────────── SignedAttributes { data, signature }
+                                                       (popup auto-closes
+                                                        200ms after the
+                                                        attributes response)
 
   wrap in AttributesIdentity
   call join_round() ───────────►
@@ -113,33 +112,38 @@ It exposes:
 
 - An **II-instance toggle** at the top (production `id.ai` vs beta
   `beta.id.ai`) — the choice is stored in `localStorage` and the page
-  reloads when it changes, so the pre-built `Signer` always talks to
-  the instance you selected.
+  reloads when it changes, so the pre-built `AuthClient` always talks
+  to the instance you selected.
 - Three buttons — **Sign in with II**, **Join round**, **My match** —
   plus a **Reset** escape hatch.
 - A live log that shows every step (pre-fetched nonce, decoded
   attributes, canister response) so you can watch the protocol execute.
 
-On page load the frontend pre-builds the `Signer` (with
-`PostMessageTransport` pointed at the selected II) and kicks off a
+On page load the frontend pre-builds the `AuthClient` (from
+[`@icp-sdk/auth`](https://js.icp.build/auth/)) and kicks off a
 `generate_nonce()` fetch, so the click handler can call
-`signer.openChannel()` with zero blocking awaits in front of it —
+`authClient.signIn(...)` with zero blocking awaits in front of it —
 otherwise the browser treats the eventual `window.open` as
 programmatically-initiated and blocks the popup.
 
-We drive the `Signer` directly rather than going through
-[`@icp-sdk/auth`](https://js.icp.build/auth/)'s `AuthClient`. Both
-`icrc34_delegation` (sign in) and `ii-icrc3-attributes` (consent to
-share the email bundle) have to share one popup, and `AuthClient`
-leaves the Signer's default `autoCloseTransportChannel: true` in
-place — which schedules a 200 ms channel-close timer after every
-response. The delegation response arrives first; the user then takes
-seconds to approve the attribute-consent screen; the 200 ms timer
-closes the popup in between and the pending `ii-icrc3-attributes`
-promise rejects with *"Channel was closed before a response was
-received"*. Constructing the `Signer` ourselves with
-`autoCloseTransportChannel: false` keeps the channel alive until we
-explicitly call `closeChannel()` after both responses land.
+`signIn` and `requestAttributes` are called sequentially on the same
+`AuthClient` (and therefore the same underlying `Signer`):
+
+```ts
+const signInPromise = authClient.signIn({ maxTimeToLive });
+const nonce  = await pendingNonce;     // pre-fetched on page load
+const inner  = await signInPromise;    // delegation
+const attrs  = await authClient.requestAttributes({
+  keys: ["sso:dfinity.org:email"], nonce,
+});
+```
+
+The same popup serves both screens. The Signer's default 200 ms
+auto-close is scheduled after the delegation response, but
+`requestAttributes` is called immediately — `Signer.openChannel`
+runs `clearTimeout` at its start, cancelling the close before it
+fires. After the attributes response the auto-close runs uninterrupted
+and the popup goes away on its own.
 
 ## What's deliberately missing
 
