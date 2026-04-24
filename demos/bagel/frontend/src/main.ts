@@ -89,12 +89,22 @@ function setSignedIn(principalText: string) {
 
 // -------------------------------------------------------- II sign-in flow --
 // This follows the official pattern from https://github.com/dfinity/icp-js-auth
-// (see the "Requesting Identity Attributes" section):
+// (see the "Requesting Identity Attributes" section), with one subtlety
+// that the README example glosses over:
 //
-//   1. Anonymous agent → backend.generate_nonce()  — canister-sourced nonce.
-//   2. In parallel, AuthClient.signIn() + AuthClient.requestAttributes()
-//      — one II popup delivers both a delegation and the signed bundle.
-//   3. Wrap the session identity in AttributesIdentity so the bundle is
+//   AuthClient.signIn() has to run *before* any `await`. Under the hood it
+//   opens the II popup via window.open, which browsers only permit while
+//   the user-activation gesture from the click is still live. Slip even a
+//   quick HttpAgent.create() in first and Chrome throws
+//     "Signer window should not be opened outside of click handler"
+//   (the error bubbles up from @slide-computer/signer-web).
+//
+// So the order is:
+//
+//   1. AuthClient.signIn()                 — popup opens synchronously.
+//   2. (in parallel) anon.generate_nonce() — canister commits to a nonce.
+//   3. AuthClient.requestAttributes(nonce) — rides the same popup session.
+//   4. Wrap the delegation in AttributesIdentity so the signed bundle is
 //      attached as `sender_info` on every subsequent ingress message.
 async function signIn() {
   log("→ init AuthClient (identityProvider = " + II_URL + ")");
@@ -102,18 +112,28 @@ async function signIn() {
     authClient = new AuthClient({ identityProvider: II_URL });
   }
 
-  // 1. Fetch a canister-issued nonce. This has to happen before we ask II
-  //    for the bundle, because the bundle's `implicit:nonce` is baked into
-  //    the signature and must match something the canister has already
-  //    committed to (Authorization tier of the identity-attributes design).
+  // 1. Open the II popup NOW, while we're still inside the user-activation
+  //    window granted by the click handler. Any await before this and the
+  //    browser blocks the window.open that signIn does internally.
+  log("→ opening II for signIn (sync — inside the click-handler gesture)");
+  const signInPromise = authClient.signIn();
+
+  // 2. While the popup is open and the user is interacting with II, fetch
+  //    a canister-issued nonce in parallel. The bundle's `implicit:nonce`
+  //    is baked into the signature and must match something the canister
+  //    has already committed to (Authorization tier of the
+  //    identity-attributes design).
   log("→ calling generate_nonce() with an anonymous agent");
   const anonAgent = await makeAgent(new AnonymousIdentity());
   const bootstrap = makeActor(anonAgent);
   const nonce = await bootstrap.generate_nonce();
   log("  nonce:", nonce);
 
-  // 2. One popup, two requests. @icp-sdk/auth's Signer batches these so
-  //    the user sees a single II interaction.
+  // 3. Queue the attributes request on the already-open signer channel.
+  //    Ordering: we only have a nonce to sign *now*, so this can't run in
+  //    step 1. But the II UI takes seconds and generate_nonce takes
+  //    hundreds of milliseconds, so this is queued well before the user
+  //    completes the dance — both requests ride a single popup session.
   //
   //    We request `sso:dfinity.org:email` specifically (not bare `email`):
   //    it's the scoped key that's authoritatively verified by the
@@ -121,19 +141,15 @@ async function signIn() {
   //    without a separate `isAllowed()` check. The Motoko library's
   //    scope-fallback lookup (`II.getText(attrs, "email")`) picks it up
   //    either way.
-  //
-  //    `Promise.all` (rather than two sequential awaits) guarantees that
-  //    if `signIn` rejects, `requestAttributes`'s eventual settlement is
-  //    still observed — no unhandled-rejection warning.
-  log(
-    "→ opening II for signIn + requestAttributes(keys: [sso:dfinity.org:email])",
-  );
-  const signInPromise = authClient.signIn();
+  log("→ requestAttributes(keys: [sso:dfinity.org:email])");
   const attributesPromise = authClient.requestAttributes({
     keys: ["sso:dfinity.org:email"],
     nonce,
   });
 
+  //    `Promise.all` (rather than two sequential awaits) guarantees that
+  //    if one rejects, the other's eventual settlement is still observed —
+  //    no unhandled-rejection warning.
   const [, { data, signature }] = await Promise.all([
     signInPromise,
     attributesPromise,
@@ -142,7 +158,7 @@ async function signIn() {
   log("  attributes.data.len:", data.length);
   log("  attributes.signature.len:", signature.length);
 
-  // 3. Wrap the inner (Delegation)Identity with AttributesIdentity. This
+  // 4. Wrap the inner (Delegation)Identity with AttributesIdentity. This
   //    is the piece that was missing from the @slide-computer/signer flow
   //    we started with — without it, the bundle never reaches the canister
   //    and `II.verify<system>` fails with `#NoAttributes`.
