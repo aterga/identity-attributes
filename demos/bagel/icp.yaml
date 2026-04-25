@@ -25,14 +25,18 @@ canisters:
             - $(mops toolchain bin moc) src/Main.mo $(mops sources) -o "$ICP_WASM_OUTPUT_PATH"
 
     settings:
-      # Trusted signer for ICRC-3 certified attribute bundles. Without this,
-      # the IC's ingress layer strips `sender_info` before it reaches the
-      # canister and `II.verify<system>` returns `#NoAttributes`.
+      # Trusted signers for ICRC-3 certified attribute bundles. Without
+      # one of these, the IC's ingress layer strips `sender_info` before
+      # it reaches the canister and `II.verify<system>` returns
+      # `#NoAttributes`.
       #
-      # `rdmx6-jaaaa-aaaaa-aaadq-cai` is the Internet Identity production
-      # canister — the only signer `mo:core/CallerAttributes` will trust.
+      # Comma-separated list (parsed by `mo:core/CallerAttributes`).
+      #   - `rdmx6-jaaaa-aaaaa-aaadq-cai` — Internet Identity production
+      #   - `fgte5-ciaaa-aaaad-aaatq-cai` — Internet Identity beta
+      # Both are listed so the frontend's II-instance toggle can flip
+      # between them without redeploying the canister.
       environment_variables:
-        trusted_attribute_signers: rdmx6-jaaaa-aaaaa-aaadq-cai
+        trusted_attribute_signers: rdmx6-jaaaa-aaaaa-aaadq-cai,fgte5-ciaaa-aaaad-aaatq-cai
 
   # --- Bagel frontend — Vite+TypeScript app served from an asset canister.
   - name: bagel_frontend

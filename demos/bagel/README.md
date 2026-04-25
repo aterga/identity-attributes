@@ -25,25 +25,26 @@ bundle.
     (pre-fetched, sits in memory)
 
   --- user clicks "Sign in with II" ---
-  authClient.signIn({ maxTimeToLive }) ──────────────► II opens popup
-    // window.open runs *sync* inside                  (delegation consent)
-    // the click gesture, before signIn's
-    // first await.
-  ◄─────────────────────────────────── DelegationChain
-
-  authClient.requestAttributes({                    ─► ii-icrc3-attributes
-    keys: ["sso:dfinity.org:email"],                   (attribute consent
-    nonce,  // pre-fetched above                        on the same popup)
-  })
-    // Called with no awaits between, so the
-    // Signer's 200ms auto-close timer scheduled
-    // after the delegation response is cancelled
-    // by openChannel() at the top of the next
-    // sendRequest — the popup is reused.
-  ◄────────────────────── SignedAttributes { data, signature }
+  Promise.all([
+    authClient.signIn({                             ─► icrc34_delegation
+      maxTimeToLive,                                   (delegation consent)
+    }),
+    pendingNonce.then(n =>                          ─► ii-icrc3-attributes
+      authClient.requestAttributes({                   (attribute consent
+        keys: ["sso:dfinity.org:email"],                on the same popup)
+        nonce: n,
+      })),
+  ])
+    // signIn opens the popup synchronously inside
+    // the click gesture; requestAttributes piggy-
+    // backs on the same channel as soon as the
+    // pre-fetched nonce resolves. Both responses
+    // come back over one PostMessageTransport
+    // session.
+  ◄──── DelegationChain  +  SignedAttributes { data, signature }
                                                        (popup auto-closes
                                                         200ms after the
-                                                        attributes response)
+                                                        last response)
 
   wrap in AttributesIdentity
   call join_round() ───────────►
@@ -126,24 +127,32 @@ On page load the frontend pre-builds the `AuthClient` (from
 otherwise the browser treats the eventual `window.open` as
 programmatically-initiated and blocks the popup.
 
-`signIn` and `requestAttributes` are called sequentially on the same
+`signIn` and `requestAttributes` are fired in parallel on the same
 `AuthClient` (and therefore the same underlying `Signer`):
 
 ```ts
 const signInPromise = authClient.signIn({ maxTimeToLive });
-const nonce  = await pendingNonce;     // pre-fetched on page load
-const inner  = await signInPromise;    // delegation
-const attrs  = await authClient.requestAttributes({
-  keys: ["sso:dfinity.org:email"], nonce,
-});
+const attrsPromise  = pendingNonce.then(nonce =>
+  authClient.requestAttributes({
+    keys: ["sso:dfinity.org:email"], nonce,
+  }),
+);
+const [inner, attrs] = await Promise.all([signInPromise, attrsPromise]);
 ```
 
-The same popup serves both screens. The Signer's default 200 ms
-auto-close is scheduled after the delegation response, but
-`requestAttributes` is called immediately — `Signer.openChannel`
-runs `clearTimeout` at its start, cancelling the close before it
-fires. After the attributes response the auto-close runs uninterrupted
-and the popup goes away on its own.
+`signIn` opens the popup synchronously inside the click gesture (the
+`window.open` happens before its first `await`), and the parallel
+`requestAttributes` posts its `ii-icrc3-attributes` request on the
+same channel as soon as the pre-fetched nonce resolves. II processes
+the two consent screens in one popup session; both responses come
+back over the same channel and `Promise.all` resolves once both
+land. The Signer's auto-close fires 200 ms after the last response
+and the popup closes on its own.
+
+This used to fail on `@icp-sdk/auth@6.2.0` because `requestAttributes`
+was emitting its JSON-RPC request without an `id`, so the response
+listener couldn't match the response and the auto-close timer killed
+the channel. Fixed in **6.2.1** — this demo pins that version.
 
 ## What's deliberately missing
 
@@ -216,11 +225,21 @@ so `icp deploy` sets it for you — no separate management-canister call.
    the printed IDs into that file (so the next `deploy` upgrades in
    place instead of re-creating).
 
-3. **Trusted signer env var** is already declared in
+3. **Trusted signers env var** is already declared in
    [`icp.yaml`](icp.yaml); `icp deploy -e ic` applies it during
-   canister settings update. `rdmx6-…-aaadq-cai` is the Internet
-   Identity production canister — the only signer
-   `mo:core/CallerAttributes` will trust.
+   canister settings update. The list is comma-separated and contains
+   both `rdmx6-…-aaadq-cai` (Internet Identity production) and
+   `fgte5-ciaaa-aaaad-aaatq-cai` (Internet Identity beta), matching
+   the frontend's II-instance toggle. `mo:core/CallerAttributes` will
+   only return attribute data when `sender_info.signer` is one of
+   these.
+
+   The IC also enforces that `sender_info.signer` matches the canister
+   that *issued* the delegation in `sender_pubkey` — so the frontend
+   has to pass the right canister ID into `AttributesIdentity`
+   depending on which II it signed in against (handled automatically
+   by the `iiCanisterIdFor(instance)` helper in
+   [`frontend/src/main.ts`](frontend/src/main.ts)).
 
 4. **Build the frontend against mainnet.** Create
    `frontend/.env.production` from `.env.example`, setting at minimum:
@@ -240,8 +259,8 @@ so `icp deploy` sets it for you — no separate management-canister call.
 6. **Smoke test.** Visit `https://<bagel_frontend-id>.icp0.io`.
    Use the **II instance** dropdown at the top to pick production
    (`id.ai`, default) or beta (`beta.id.ai`) — the page reloads so the
-   pre-built `Signer` talks to the right endpoint. Sign-in opens II
-   once and returns both a delegation and a signed
+   pre-built `AuthClient` talks to the right endpoint. Sign-in opens
+   II once and returns both a delegation and a signed
    `sso:dfinity.org:email` bundle on the same popup channel.
    `join_round` rides on an `AttributesIdentity` wrapper (from
    `@icp-sdk/core/identity`), which attaches the signed bundle as

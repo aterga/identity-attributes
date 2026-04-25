@@ -6,12 +6,24 @@ import { Principal } from "@icp-sdk/core/principal";
 import { idlFactory, type Bagel, type JoinResult } from "./bagel.did";
 
 // ---------------------------------------------------------------- config --
-// Internet Identity's canister — the principal whose signature sits on
-// every attribute bundle. The bagel canister's `trusted_attribute_signers`
-// env var must contain this same principal (see icp.yaml), otherwise the
-// IC's ingress layer will strip `sender_info` before it reaches our Motoko
-// code.
-const II_CANISTER_ID = "rdmx6-jaaaa-aaaaa-aaadq-cai";
+// Internet Identity's canister IDs — the principal whose signature sits
+// on every attribute bundle (and on the delegation chain). The bagel
+// canister's `trusted_attribute_signers` env var must contain whichever
+// one we're signing in against, otherwise the IC's ingress layer will
+// strip `sender_info` before it reaches our Motoko code.
+//
+// We have to pass the *correct* signer ID into AttributesIdentity:
+// the IC validates that `sender_info.signer` matches the canister that
+// issued the delegation in `sender_pubkey`. A mismatch surfaces as
+//   "Invalid sender info: signer X does not match canister ID Y in
+//    sender_pubkey"
+// at /api/v4/.../call.
+const II_CANISTER_ID_PROD = "rdmx6-jaaaa-aaaaa-aaadq-cai";
+const II_CANISTER_ID_BETA = "fgte5-ciaaa-aaaad-aaatq-cai";
+
+function iiCanisterIdFor(instance: IIInstance): string {
+  return instance === "beta" ? II_CANISTER_ID_BETA : II_CANISTER_ID_PROD;
+}
 
 const BAGEL_CANISTER_ID =
   (import.meta.env.VITE_BAGEL_CANISTER_ID as string | undefined) ??
@@ -156,65 +168,74 @@ function renderEndpoint() {
 //       `Signer.openChannel()` → `PostMessageTransport.establishChannel()`)
 //       has to run synchronously inside the click gesture. Any `await`
 //       before it and Chrome flags the eventual open as programmatic →
-//       popup blocker. So we kick off `authClient.signIn(...)` *before*
-//       touching `pendingNonce` and stash its promise; the `window.open`
-//       inside it fires synchronously before the first await.
+//       popup blocker. So `authClient.signIn(...)` is the very first call
+//       in this function — the `window.open` inside it fires synchronously
+//       before the first await.
 //
-//   (b) The two JSON-RPC calls — `icrc34_delegation` and
-//       `ii-icrc3-attributes` — have to share one popup. AuthClient
-//       exposes them as separate methods (`signIn` + `requestAttributes`),
-//       which internally both use the same `Signer` instance. The
-//       Signer's default auto-close scheduler fires 200ms after each
-//       response — *but* `openChannel()` calls `clearTimeout` at its
-//       start, so calling `requestAttributes` immediately after `signIn`
-//       resolves cancels the pending close and the same popup is reused
-//       for the second request. No `await` between them → the clear
-//       beats the 200 ms fire.
+//   (b) Both ICRC-25 calls — `icrc34_delegation` and
+//       `ii-icrc3-attributes` — share one popup. AuthClient exposes them
+//       as separate methods that internally use the same `Signer`
+//       instance. We fire them in parallel: signIn opens the channel,
+//       requestAttributes piggybacks on it as soon as the pre-fetched
+//       nonce resolves. II processes the two requests on the same
+//       channel and the user sees both consent screens in one popup
+//       session.
 async function signIn() {
   if (!authClient) throw new Error("AuthClient not initialised yet");
   if (!pendingNonce) throw new Error("Nonce fetch not started");
 
+  // Local binding so the closure below sees a non-null `client`.
+  const client = authClient;
+
+  log("→ authClient.signIn() + requestAttributes() — parallel, single popup");
+
   // 1. Kick off signIn FIRST, before any `await`. Its internal
-  //    `Signer.openChannel → window.open` runs synchronously inside
-  //    the click, so the popup opens unblocked.
-  log("→ authClient.signIn() — popup opens inside click gesture");
-  const signInPromise = authClient.signIn({
+  //    `Signer.openChannel → window.open` runs synchronously inside the
+  //    click, so the popup opens unblocked.
+  const signInPromise = client.signIn({
     maxTimeToLive: MAX_TIME_TO_LIVE_NS,
   });
 
-  // 2. While the user is staring at the delegation consent screen,
-  //    await the pre-fetched nonce (resolved on page load).
-  const nonce = await pendingNonce;
-  log("  nonce:", nonce);
-
-  // 3. Wait for the delegation response.
-  const inner = await signInPromise;
-  log("  delegation: ok");
-
-  // 4. Immediately request attributes on the SAME popup. `openChannel`
-  //    inside sendRequest clears the 200ms auto-close scheduled after
-  //    the delegation response, so the popup stays up for the attribute
-  //    consent screen. We ask for `sso:dfinity.org:email` specifically —
-  //    the scoped key authoritatively verified by the @dfinity.org SSO
-  //    provider, so the canister can trust the domain without a separate
+  // 2. Kick off requestAttributes alongside it. Wrapped in an inline
+  //    async so it can await the pre-fetched nonce *without* delaying
+  //    the synchronous signIn call above. We ask for
+  //    `sso:dfinity.org:email` specifically — the scoped key
+  //    authoritatively verified by the @dfinity.org SSO provider, so
+  //    the canister can trust the domain without a separate
   //    `isAllowed()` check. The Motoko library's scope-fallback lookup
   //    (`II.getText(attrs, "email")`) picks it up either way.
-  log("→ authClient.requestAttributes({sso:dfinity.org:email}) — same popup");
-  const signedAttrs = await authClient.requestAttributes({
-    keys: ["sso:dfinity.org:email"],
-    nonce,
+  const attrsPromise = pendingNonce.then((nonce) => {
+    log("  nonce:", nonce);
+    return client.requestAttributes({
+      keys: ["sso:dfinity.org:email"],
+      nonce,
+    });
   });
+
+  // 3. Both responses come back on the same channel. AuthClient v6.2.1
+  //    populates the JSON-RPC `id` on requestAttributes (6.2.0 didn't,
+  //    which made the response unmatchable and the channel auto-close
+  //    timer fire) — so Promise.all here resolves cleanly.
+  const [inner, signedAttrs] = await Promise.all([
+    signInPromise,
+    attrsPromise,
+  ]);
+  log("  delegation: ok");
   log("  attributes: data.len =", signedAttrs.data.length);
   log("  attributes: sig.len  =", signedAttrs.signature.length);
 
-  // 5. Wrap the DelegationIdentity returned by signIn with
+  // 4. Wrap the DelegationIdentity returned by signIn with
   //    AttributesIdentity — this injects `sender_info` on every outgoing
   //    canister call, so the bagel canister's `II.verify<system>` sees
-  //    the signed bundle.
+  //    the signed bundle. The signer canister ID has to match the
+  //    canister that *issued* the delegation in `sender_pubkey` —
+  //    beta II for `beta.id.ai`, prod II for `id.ai`.
   const identity = new AttributesIdentity({
     inner,
     attributes: signedAttrs,
-    signer: { canisterId: Principal.fromText(II_CANISTER_ID) },
+    signer: {
+      canisterId: Principal.fromText(iiCanisterIdFor(iiInstance)),
+    },
   });
 
   const agent = await makeAgent(identity);
