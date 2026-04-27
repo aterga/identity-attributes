@@ -1,7 +1,7 @@
-import { Actor, AnonymousIdentity, HttpAgent } from "@icp-sdk/core/agent";
+import { Actor, AnonymousIdentity, HttpAgent, type SignIdentity } from "@icp-sdk/core/agent";
 import { AuthClient } from "@icp-sdk/auth/client";
 import { IDL } from "@icp-sdk/core/candid";
-import { AttributesIdentity } from "@icp-sdk/core/identity";
+import { AttributesIdentity, Ed25519KeyIdentity } from "@icp-sdk/core/identity";
 import { Principal } from "@icp-sdk/core/principal";
 
 import { idlFactory, type Bagel, type JoinResult } from "./bagel.did";
@@ -34,6 +34,26 @@ ICRC3ValueIDL.fill(
 function decodeAttributes(blob: Uint8Array): ICRC3Value {
   const [decoded] = IDL.decode([ICRC3ValueIDL], blob) as [ICRC3Value];
   return decoded;
+}
+
+// Render an ICRC-3 Value as a one-line human-readable string. Used by the
+// DEBUG dump to show the full decoded attribute map.
+function renderValue(v: ICRC3Value): string {
+  if ("Text"  in v) return JSON.stringify(v.Text);
+  if ("Nat"   in v) return v.Nat.toString();
+  if ("Int"   in v) return v.Int.toString();
+  if ("Blob"  in v) {
+    // IDL decodes vec nat8 as either Uint8Array or number[] depending on
+    // version; either way it's iterable.
+    const bytes = v.Blob as Iterable<number>;
+    return "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  if ("Array" in v) return "[" + v.Array.map(renderValue).join(", ") + "]";
+  return (
+    "{" +
+    v.Map.map(([k, vv]) => `${JSON.stringify(k)}: ${renderValue(vv)}`).join(", ") +
+    "}"
+  );
 }
 
 // Look up `key` in a `#Map` value. Mirrors the scope-fallback behaviour of
@@ -219,6 +239,12 @@ function makeActor(agent: HttpAgent): Bagel {
 // run inside the user's click gesture or Chrome's popup blocker kicks in.
 let iiInstance: IIInstance = loadInstance();
 let authClient: AuthClient | null = null;
+// Session signing key, generated once on page load and passed to AuthClient
+// so each `signIn` reuses it. Match the test-app reference at
+// `dfinity/internet-identity/demos/test-app/src/index.tsx` which does the
+// same with Ed25519 — AuthClient's *default* (ECDSAKeyIdentity P-256) is
+// what produced the "Invalid basic signature: EcdsaP256" ingress error.
+let sessionIdentity: SignIdentity | null = null;
 let pendingNonce: Promise<Uint8Array> | null = null;
 let bagel: Bagel | null = null;
 // DEBUG-only: a Bagel actor whose agent uses *just* the inner DelegationIdentity,
@@ -268,8 +294,11 @@ function setSignedIn(principalText: string, email: string | null) {
         `via the SSO option in Internet Identity.`;
     }
     $gate.hidden = false;
-    $join.disabled = true;
-    $match.disabled = true;
+    // In DEBUG mode keep the buttons enabled so we can still drive the
+    // canister calls from a wrong-email account (the canister will
+    // reject; that's fine — we want to see the error path).
+    $join.disabled = !DEBUG;
+    $match.disabled = !DEBUG;
     // `reset` left enabled so a wrong-email user can try again with a
     // different account; sign-in stays disabled until reload (II flow
     // is single-shot in this demo).
@@ -359,6 +388,12 @@ async function signIn() {
     const decoded = decodeAttributes(signedAttrs.data);
     email = getMapText(decoded, "email");
     log("  email:", email ?? "(not present)");
+    if (DEBUG && "Map" in decoded) {
+      log("  [debug] decoded bundle (" + decoded.Map.length + " entries):");
+      for (const [k, v] of [...decoded.Map].sort(([a], [b]) => a.localeCompare(b))) {
+        log("    " + k + " = " + renderValue(v));
+      }
+    }
   } catch (e) {
     log("  ✗ failed to decode attribute bundle:", String(e));
   }
@@ -501,10 +536,12 @@ if (DEBUG) {
 }
 log("");
 
+sessionIdentity = Ed25519KeyIdentity.generate();
 authClient = new AuthClient({
+  identity: sessionIdentity,
   identityProvider: identityProviderFor(iiInstance),
 });
-log("✓ AuthClient initialised (pre-click)");
+log("✓ AuthClient initialised (pre-click, Ed25519 session key)");
 
 pendingNonce = (async () => {
   const anonAgent = await makeAgent(new AnonymousIdentity());
