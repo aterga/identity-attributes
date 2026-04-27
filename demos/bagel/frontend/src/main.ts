@@ -84,6 +84,24 @@ function identityProviderFor(instance: IIInstance): string {
 // 8-hour delegation lifetime — matches `AuthClient`'s own default.
 const MAX_TIME_TO_LIVE_NS = 8n * 60n * 60n * 1_000_000_000n;
 
+// Toggle with `?debug=1` to dump byte-level info for the attribute bundle
+// and to additionally exercise `join_round()` with a *bare* DelegationIdentity
+// (no AttributesIdentity). The bare call should reach the canister and fail
+// inside with `#NoAttributes`; if it instead 400s with the same EcdsaP256
+// signature error, the IC ingress signature path is broken independent of
+// `sender_info`.
+const DEBUG = new URLSearchParams(location.search).has("debug");
+
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+function hexHead(bytes: Uint8Array, n = 16): string {
+  return hex(bytes.slice(0, n)) + (bytes.length > n ? "…" : "");
+}
+function hexTail(bytes: Uint8Array, n = 16): string {
+  return (bytes.length > n ? "…" : "") + hex(bytes.slice(-n));
+}
+
 // ---------------------------------------------------------------- DOM refs --
 const $status     = document.getElementById("status")!;
 const $principal  = document.getElementById("principal")!;
@@ -142,6 +160,10 @@ let iiInstance: IIInstance = loadInstance();
 let authClient: AuthClient | null = null;
 let pendingNonce: Promise<Uint8Array> | null = null;
 let bagel: Bagel | null = null;
+// DEBUG-only: a Bagel actor whose agent uses *just* the inner DelegationIdentity,
+// with no AttributesIdentity wrapping. Used to isolate whether the EcdsaP256
+// signature error is caused by sender_info pollution.
+let bareBagel: Bagel | null = null;
 
 function setSignedIn(principalText: string) {
   $status.textContent = "signed in";
@@ -224,6 +246,17 @@ async function signIn() {
   log("  attributes: data.len =", signedAttrs.data.length);
   log("  attributes: sig.len  =", signedAttrs.signature.length);
 
+  if (DEBUG) {
+    const signerBytes = Principal.fromText(iiCanisterIdFor(iiInstance)).toUint8Array();
+    log("  [debug] sender_info.signer:", iiCanisterIdFor(iiInstance));
+    log("  [debug] sender_info.signer.bytes (len, hex):",
+        signerBytes.length, hex(signerBytes));
+    log("  [debug] sender_info.info head/tail:",
+        hexHead(signedAttrs.data), "/", hexTail(signedAttrs.data));
+    log("  [debug] sender_info.sig  head/tail:",
+        hexHead(signedAttrs.signature), "/", hexTail(signedAttrs.signature));
+  }
+
   // 4. Wrap the DelegationIdentity returned by signIn with
   //    AttributesIdentity — this injects `sender_info` on every outgoing
   //    canister call, so the bagel canister's `II.verify<system>` sees
@@ -240,6 +273,17 @@ async function signIn() {
 
   const agent = await makeAgent(identity);
   bagel = makeActor(agent);
+
+  if (DEBUG) {
+    // Same delegation, same session key, same agent host — but NO
+    // AttributesIdentity wrap, so no sender_info on the wire. If
+    // join_round() reaches the canister with this and only fails inside
+    // with `#NoAttributes`, the IC ingress signature path is fine and
+    // the basic-signature error is sender_info-induced.
+    const bareAgent = await makeAgent(inner);
+    bareBagel = makeActor(bareAgent);
+    log("  [debug] bareBagel actor ready (DelegationIdentity only, no AttributesIdentity)");
+  }
 
   const p = inner.getPrincipal().toText();
   setSignedIn(p);
@@ -259,6 +303,22 @@ function formatJoin(r: JoinResult): string {
 
 async function join() {
   if (!bagel) return;
+
+  if (DEBUG && bareBagel) {
+    log("→ [debug] calling join_round() with bare DelegationIdentity (no sender_info)");
+    try {
+      const res = await bareBagel.join_round();
+      // Expected when the IC accepts the call but the canister sees no
+      // attributes: `Err({Verify: NoAttributes})`. That confirms the IC
+      // ingress signature path works fine without sender_info, isolating
+      // the EcdsaP256 failure to the AttributesIdentity wrapping.
+      log("  [debug] bare result:", formatJoin(res));
+      log("  [debug] bare raw:", res);
+    } catch (e) {
+      log("  [debug] bare ERROR:", String(e));
+    }
+  }
+
   log("→ calling join_round()");
   try {
     const res = await bagel.join_round();
@@ -318,6 +378,10 @@ log(`bagel canister: ${BAGEL_CANISTER_ID}`);
 log(`IC host:        ${IC_HOST}`);
 log(`II instance:    ${iiInstance}`);
 log(`II endpoint:    ${identityProviderFor(iiInstance)}`);
+if (DEBUG) {
+  log("DEBUG mode ON  — sender_info bytes will be dumped, and join_round()");
+  log("                 will additionally be called with a bare delegation.");
+}
 log("");
 
 authClient = new AuthClient({
@@ -340,8 +404,8 @@ pendingNonce
 log("");
 log("1. Sign in with II — single popup delivers a delegation + a signed");
 log("   email attribute bundle (icrc34_delegation + ii-icrc3-attributes,");
-log("   sequential on the same Signer channel; AuthClient's default auto-");
-log("   close timer is cancelled by the second call's openChannel()).");
+log("   fired in parallel via Promise.all on the same AuthClient — both");
+log("   share one PostMessageTransport channel).");
 log("2. Join round — the wrapped AttributesIdentity attaches the bundle");
 log("   as sender_info; the canister verifies origin + nonce + freshness,");
 log("   then pairs you with another @dfinity.org human.");
