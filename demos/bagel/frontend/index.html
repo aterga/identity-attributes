@@ -56,6 +56,15 @@
         border-radius: 3px;
         font-size: 0.8rem;
       }
+      .gate {
+        margin: 1rem 0;
+        padding: 0.75rem 1rem;
+        border-radius: 4px;
+        font-size: 0.95rem;
+      }
+      .gate-ok    { background: #e8f7ee; border: 1px solid #b6e0c5; color: #1e6b3a; }
+      .gate-block { background: #fdecec; border: 1px solid #f4b9b9; color: #8a1f1f; }
+      .gate code  { background: #fff5; padding: 0.05rem 0.3rem; border-radius: 3px; }
     </style>
   </head>
   <body>
@@ -76,7 +85,9 @@
     <p>
       Status: <span id="status">not signed in</span>
       <span id="principal" class="pill" hidden></span>
+      <span id="email" class="pill" hidden></span>
     </p>
+    <div id="gate" class="gate" hidden></div>
     <div class="row">
       <button id="signIn">Sign in with II</button>
       <button id="join" disabled>Join round</button>

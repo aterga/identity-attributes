@@ -1,9 +1,62 @@
 import { Actor, AnonymousIdentity, HttpAgent } from "@icp-sdk/core/agent";
 import { AuthClient } from "@icp-sdk/auth/client";
+import { IDL } from "@icp-sdk/core/candid";
 import { AttributesIdentity } from "@icp-sdk/core/identity";
 import { Principal } from "@icp-sdk/core/principal";
 
 import { idlFactory, type Bagel, type JoinResult } from "./bagel.did";
+
+// ICRC-3 `Value` recursive variant (matches the canonical type used by
+// II's attribute bundles). The `info` blob inside `SignedAttributes` is
+// a Candid-encoded value of this type — typically a `#Map` whose entries
+// include `email`, scoped keys like `sso:dfinity.org:email`, and the
+// `implicit:*` fields (origin, nonce, issued_at_timestamp_ns).
+type ICRC3Value =
+  | { Nat: bigint }
+  | { Int: bigint }
+  | { Blob: Uint8Array }
+  | { Text: string }
+  | { Array: ICRC3Value[] }
+  | { Map: [string, ICRC3Value][] };
+
+const ICRC3ValueIDL = IDL.Rec();
+ICRC3ValueIDL.fill(
+  IDL.Variant({
+    Nat: IDL.Nat,
+    Int: IDL.Int,
+    Blob: IDL.Vec(IDL.Nat8),
+    Text: IDL.Text,
+    Array: IDL.Vec(ICRC3ValueIDL),
+    Map: IDL.Vec(IDL.Tuple(IDL.Text, ICRC3ValueIDL)),
+  }),
+);
+
+function decodeAttributes(blob: Uint8Array): ICRC3Value {
+  const [decoded] = IDL.decode([ICRC3ValueIDL], blob) as [ICRC3Value];
+  return decoded;
+}
+
+// Look up `key` in a `#Map` value. Mirrors the scope-fallback behaviour of
+// `mo:identity-attributes`'s `Attributes.get`: if `key` has no scope, also
+// match any `<scope>:key` entry, preferring the bare match. We split on the
+// LAST `:` because scopes themselves contain colons (e.g. `openid:https://…`).
+function getMapText(value: ICRC3Value, key: string): string | null {
+  if (!("Map" in value)) return null;
+  let scoped: string | null = null;
+  for (const [k, v] of value.Map) {
+    if (k === key) {
+      if ("Text" in v) return v.Text;
+      return null;
+    }
+    if (!key.includes(":")) {
+      const idx = k.lastIndexOf(":");
+      if (idx > 0 && k.slice(idx + 1) === key && "Text" in v) {
+        scoped = v.Text;
+      }
+    }
+  }
+  return scoped;
+}
 
 // ---------------------------------------------------------------- config --
 // Internet Identity's canister IDs — the principal whose signature sits
@@ -84,6 +137,12 @@ function identityProviderFor(instance: IIInstance): string {
 // 8-hour delegation lifetime — matches `AuthClient`'s own default.
 const MAX_TIME_TO_LIVE_NS = 8n * 60n * 60n * 1_000_000_000n;
 
+// Domain we gate access on, both client-side (UX) and inside the canister
+// (`Main.mo:38` — the canister-side check is the one that's actually
+// trusted; this is here purely so non-DFINITY users get a clear message
+// before they click Join).
+const ALLOWED_DOMAIN = "dfinity.org";
+
 // Toggle with `?debug=1` to dump byte-level info for the attribute bundle
 // and to additionally exercise `join_round()` with a *bare* DelegationIdentity
 // (no AttributesIdentity). The bare call should reach the canister and fail
@@ -105,6 +164,8 @@ function hexTail(bytes: Uint8Array, n = 16): string {
 // ---------------------------------------------------------------- DOM refs --
 const $status     = document.getElementById("status")!;
 const $principal  = document.getElementById("principal")!;
+const $email      = document.getElementById("email")!;
+const $gate       = document.getElementById("gate")!;
 const $log        = document.getElementById("log")!;
 const $signIn     = document.getElementById("signIn") as HTMLButtonElement;
 const $join       = document.getElementById("join")   as HTMLButtonElement;
@@ -165,18 +226,61 @@ let bagel: Bagel | null = null;
 // signature error is caused by sender_info pollution.
 let bareBagel: Bagel | null = null;
 
-function setSignedIn(principalText: string) {
+function setSignedIn(principalText: string, email: string | null) {
   $status.textContent = "signed in";
   $principal.textContent = principalText.slice(0, 5) + "…" + principalText.slice(-5);
   $principal.hidden = false;
   $signIn.disabled = true;
-  $join.disabled = false;
-  $match.disabled = false;
-  $reset.disabled = false;
   // Don't let the user flip II instances while a delegation from the other
   // one is active — the next requestAttributes would go to a different
   // popup and confusion ensues.
   $iiToggle.disabled = true;
+
+  // Client-side gate: surface the email and only enable the canister-call
+  // buttons when it ends in @dfinity.org. The canister enforces the same
+  // check via `mo:identity-attributes`'s `#Authorization` policy, so this
+  // is purely a UX layer — but it saves the user a popup → click → reject
+  // round-trip when their email is wrong.
+  const allowed = email !== null && email.toLowerCase().endsWith("@" + ALLOWED_DOMAIN);
+  if (email) {
+    $email.textContent = email;
+    $email.hidden = false;
+  }
+  if (allowed) {
+    $gate.className = "gate gate-ok";
+    $gate.innerHTML = `Welcome, <code>${escapeHtml(email!)}</code> — you're cleared for coffee.`;
+    $gate.hidden = false;
+    $join.disabled = false;
+    $match.disabled = false;
+    $reset.disabled = false;
+  } else {
+    $gate.className = "gate gate-block";
+    if (email) {
+      $gate.innerHTML =
+        `Sorry, <code>${escapeHtml(email)}</code> isn't on the guest list — ` +
+        `Bagel is only open to members of the DFINITY Foundation. ` +
+        `If you are a member, please sign in with your <code>@${ALLOWED_DOMAIN}</code> ` +
+        `email via the SSO option in Internet Identity.`;
+    } else {
+      $gate.textContent =
+        `Sorry, this app is only for members of the DFINITY Foundation. ` +
+        `If you are a member, please sign in with your @${ALLOWED_DOMAIN} email ` +
+        `via the SSO option in Internet Identity.`;
+    }
+    $gate.hidden = false;
+    $join.disabled = true;
+    $match.disabled = true;
+    // `reset` left enabled so a wrong-email user can try again with a
+    // different account; sign-in stays disabled until reload (II flow
+    // is single-shot in this demo).
+    $reset.disabled = false;
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+  );
 }
 
 function renderEndpoint() {
@@ -246,6 +350,19 @@ async function signIn() {
   log("  attributes: data.len =", signedAttrs.data.length);
   log("  attributes: sig.len  =", signedAttrs.signature.length);
 
+  // Decode the attribute bundle locally so the UI can gate the Join
+  // button on the email's domain BEFORE the user clicks. The bundle
+  // is signed by II — we still rely on the canister to verify that
+  // signature; this client-side decode is purely for UX.
+  let email: string | null = null;
+  try {
+    const decoded = decodeAttributes(signedAttrs.data);
+    email = getMapText(decoded, "email");
+    log("  email:", email ?? "(not present)");
+  } catch (e) {
+    log("  ✗ failed to decode attribute bundle:", String(e));
+  }
+
   if (DEBUG) {
     const signerBytes = Principal.fromText(iiCanisterIdFor(iiInstance)).toUint8Array();
     log("  [debug] sender_info.signer:", iiCanisterIdFor(iiInstance));
@@ -286,7 +403,7 @@ async function signIn() {
   }
 
   const p = inner.getPrincipal().toText();
-  setSignedIn(p);
+  setSignedIn(p, email);
   log("  signed in as", p);
 }
 
