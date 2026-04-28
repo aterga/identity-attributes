@@ -163,6 +163,21 @@ const MAX_TIME_TO_LIVE_NS = 8n * 60n * 60n * 1_000_000_000n;
 // before they click Join).
 const ALLOWED_DOMAIN = "dfinity.org";
 
+// Default attribute keys we ask II to include in the bundle. Override
+// with `?keys=email,sso:dfinity.org:email,name` (comma-separated) for
+// triage — useful when comparing what beta II returns for scoped vs
+// bare keys without having to redeploy. The Motoko library's scope-
+// fallback lookup handles either form on the canister side.
+const DEFAULT_REQUEST_KEYS = ["sso:dfinity.org:email"];
+function requestKeys(): string[] {
+  const qs = new URLSearchParams(location.search).get("keys");
+  if (qs === null) return DEFAULT_REQUEST_KEYS;
+  return qs
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 // Toggle with `?debug=1` to dump byte-level info for the attribute bundle
 // and to additionally exercise `join_round()` with a *bare* DelegationIdentity
 // (no AttributesIdentity). The bare call should reach the canister and fail
@@ -359,12 +374,11 @@ async function signIn() {
   //    the canister can trust the domain without a separate
   //    `isAllowed()` check. The Motoko library's scope-fallback lookup
   //    (`II.getText(attrs, "email")`) picks it up either way.
+  const keys = requestKeys();
   const attrsPromise = pendingNonce.then((nonce) => {
     log("  nonce:", nonce);
-    return client.requestAttributes({
-      keys: ["sso:dfinity.org:email"],
-      nonce,
-    });
+    log("  requesting keys:", JSON.stringify(keys));
+    return client.requestAttributes({ keys, nonce });
   });
 
   // 3. Both responses come back on the same channel. AuthClient v6.2.1
@@ -530,6 +544,7 @@ log(`bagel canister: ${BAGEL_CANISTER_ID}`);
 log(`IC host:        ${IC_HOST}`);
 log(`II instance:    ${iiInstance}`);
 log(`II endpoint:    ${identityProviderFor(iiInstance)}`);
+log(`request keys:   ${JSON.stringify(requestKeys())}`);
 if (DEBUG) {
   log("DEBUG mode ON  — sender_info bytes will be dumped, and join_round()");
   log("                 will additionally be called with a bare delegation.");
