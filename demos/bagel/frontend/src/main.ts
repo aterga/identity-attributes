@@ -36,6 +36,124 @@ function decodeAttributes(blob: Uint8Array): ICRC3Value {
   return decoded;
 }
 
+// Result of the eager local verification we run right after sign-in.
+// Mirrors the four implicit-field + email-domain checks that the
+// canister's `#Authorization` policy + `mo:identity-attributes` would
+// enforce on `join_round`. The canister-signature on the bundle isn't
+// verifiable client-side (needs subnet keys), so the canister round-
+// trip remains the authoritative gate — but this catches the common
+// failure modes (wrong origin, wrong nonce, stale bundle, wrong
+// account) before the user clicks anything.
+interface AttrCheck {
+  name: string;
+  ok: boolean;
+  detail?: string;
+}
+interface VerifyResult {
+  ok: boolean;
+  email: string | null;
+  checks: AttrCheck[];
+}
+
+function bytesEqual(
+  a: Uint8Array | number[] | null,
+  b: Uint8Array,
+): boolean {
+  if (a === null) return false;
+  const aArr = a instanceof Uint8Array ? a : new Uint8Array(a);
+  if (aArr.length !== b.length) return false;
+  for (let i = 0; i < aArr.length; i++) if (aArr[i] !== b[i]) return false;
+  return true;
+}
+
+function verifyAttributesLocally(
+  decoded: ICRC3Value,
+  opts: {
+    expectedRpOrigin: string; // already remapped via remapToLegacyDomain
+    expectedNonce: Uint8Array;
+    nowNs: bigint;
+    maxAgeNs: bigint;
+    allowedDomain: string;
+  },
+): VerifyResult {
+  if (!("Map" in decoded)) {
+    return {
+      ok: false,
+      email: null,
+      checks: [{ name: "bundle is a Map", ok: false, detail: "got non-Map value" }],
+    };
+  }
+  const lookup = new Map<string, ICRC3Value>(decoded.Map);
+  const checks: AttrCheck[] = [];
+
+  // 1. implicit:origin — what II attests to MUST equal what we expect
+  //    (after applying `remapToLegacyDomain`, since II maps icp0.io →
+  //    ic0.app for principal stability).
+  const originVal = lookup.get("implicit:origin");
+  const actualOrigin =
+    originVal && "Text" in originVal ? originVal.Text : null;
+  checks.push({
+    name: "implicit:origin",
+    ok: actualOrigin === opts.expectedRpOrigin,
+    detail:
+      actualOrigin === null
+        ? "missing"
+        : actualOrigin === opts.expectedRpOrigin
+          ? `${actualOrigin}`
+          : `expected ${opts.expectedRpOrigin}, got ${actualOrigin}`,
+  });
+
+  // 2. implicit:nonce — bytes must equal the nonce the bagel canister
+  //    issued and we passed to requestAttributes. Replay protection.
+  const nonceVal = lookup.get("implicit:nonce");
+  const actualNonce =
+    nonceVal && "Blob" in nonceVal ? nonceVal.Blob : null;
+  checks.push({
+    name: "implicit:nonce",
+    ok: bytesEqual(actualNonce, opts.expectedNonce),
+    detail:
+      actualNonce === null ? "missing" : "matches the canister-issued nonce",
+  });
+
+  // 3. implicit:issued_at_timestamp_ns — within the freshness window.
+  const tsVal = lookup.get("implicit:issued_at_timestamp_ns");
+  const actualTs = tsVal && "Nat" in tsVal ? tsVal.Nat : null;
+  if (actualTs === null) {
+    checks.push({ name: "freshness", ok: false, detail: "implicit:issued_at_timestamp_ns missing" });
+  } else {
+    const ageNs = opts.nowNs - actualTs;
+    const ok = ageNs >= 0n && ageNs <= opts.maxAgeNs;
+    const ageSec = ageNs / 1_000_000_000n;
+    const maxSec = opts.maxAgeNs / 1_000_000_000n;
+    checks.push({
+      name: "freshness",
+      ok,
+      detail: ok
+        ? `${ageSec}s old (≤ ${maxSec}s)`
+        : ageNs < 0n
+          ? `bundle issued ${-ageSec}s in the future — clock skew?`
+          : `bundle is ${ageSec}s old (> ${maxSec}s)`,
+    });
+  }
+
+  // 4. email domain — scope-fallback lookup, must end with @<allowedDomain>.
+  const email = getMapText(decoded, "email");
+  const allowed =
+    email !== null && email.toLowerCase().endsWith("@" + opts.allowedDomain);
+  checks.push({
+    name: `email domain @${opts.allowedDomain}`,
+    ok: allowed,
+    detail:
+      email === null
+        ? "no email attribute in bundle"
+        : allowed
+          ? email
+          : `got ${email}`,
+  });
+
+  return { ok: checks.every((c) => c.ok), email, checks };
+}
+
 // Render an ICRC-3 Value as a one-line human-readable string. Used by the
 // DEBUG dump to show the full decoded attribute map.
 function renderValue(v: ICRC3Value): string {
@@ -163,6 +281,25 @@ const MAX_TIME_TO_LIVE_NS = 8n * 60n * 60n * 1_000_000_000n;
 // before they click Join).
 const ALLOWED_DOMAIN = "dfinity.org";
 
+// Freshness window we apply to `implicit:issued_at_timestamp_ns`. Mirrors
+// the canister-side `maxAttrAgeNs` in `src/Main.mo` so the eager local
+// check matches what `II.verify<system>` will enforce.
+const MAX_ATTR_AGE_NS = 5n * 60n * 1_000_000_000n;
+
+// Copied verbatim from the II repo at
+// `src/frontend/src/lib/utils/iiConnection.ts:998` so this demo's local
+// origin check matches what II actually attests to in the bundle's
+// `implicit:origin`. II rewrites the new `<canister>.icp0.io` domain
+// back to `<canister>.ic0.app` to keep principals stable for dapps that
+// pre-date the icp0.io rollout.
+function remapToLegacyDomain(origin: string): string {
+  const ORIGIN_MAPPING_REGEX =
+    /^https:\/\/(?<subdomain>[\w-]+(?:\.raw)?)\.icp0\.io$/;
+  const match = origin.match(ORIGIN_MAPPING_REGEX);
+  const subdomain = match?.groups?.subdomain;
+  return subdomain !== undefined ? `https://${subdomain}.ic0.app` : origin;
+}
+
 // Default attribute keys we ask II to include in the bundle. Override
 // with `?keys=email,sso:dfinity.org:email,name` (comma-separated) for
 // triage — useful when comparing what beta II returns for scoped vs
@@ -267,7 +404,7 @@ let bagel: Bagel | null = null;
 // signature error is caused by sender_info pollution.
 let bareBagel: Bagel | null = null;
 
-function setSignedIn(principalText: string, email: string | null) {
+function setSignedIn(principalText: string, verify: VerifyResult | null) {
   $status.textContent = "signed in";
   $principal.textContent = principalText.slice(0, 5) + "…" + principalText.slice(-5);
   $principal.hidden = false;
@@ -277,48 +414,65 @@ function setSignedIn(principalText: string, email: string | null) {
   // popup and confusion ensues.
   $iiToggle.disabled = true;
 
-  // Client-side gate: surface the email and only enable the canister-call
-  // buttons when it ends in @dfinity.org. The canister enforces the same
-  // check via `mo:identity-attributes`'s `#Authorization` policy, so this
-  // is purely a UX layer — but it saves the user a popup → click → reject
-  // round-trip when their email is wrong.
-  const allowed = email !== null && email.toLowerCase().endsWith("@" + ALLOWED_DOMAIN);
-  if (email) {
-    $email.textContent = email;
+  if (verify?.email) {
+    $email.textContent = verify.email;
     $email.hidden = false;
   }
-  if (allowed) {
+
+  // Treat a decode failure (verify === null) the same as a failed
+  // verification: block the buttons, show a generic error.
+  const allChecksPass = verify?.ok === true;
+  const emailFailedDomain =
+    verify !== null &&
+    !allChecksPass &&
+    verify.checks.some(
+      (c) => c.name === `email domain @${ALLOWED_DOMAIN}` && !c.ok,
+    );
+
+  if (allChecksPass) {
     $gate.className = "gate gate-ok";
-    $gate.innerHTML = `Welcome, <code>${escapeHtml(email!)}</code> — you're cleared for coffee.`;
+    $gate.innerHTML =
+      `Welcome, <code>${escapeHtml(verify!.email!)}</code> — bundle ` +
+      `verified locally (${verify!.checks.length}/${verify!.checks.length} checks).`;
     $gate.hidden = false;
     $join.disabled = false;
     $match.disabled = false;
     $reset.disabled = false;
-  } else {
-    $gate.className = "gate gate-block";
-    if (email) {
-      $gate.innerHTML =
-        `Sorry, <code>${escapeHtml(email)}</code> isn't on the guest list — ` +
-        `Bagel is only open to members of the DFINITY Foundation. ` +
-        `If you are a member, please sign in with your <code>@${ALLOWED_DOMAIN}</code> ` +
-        `email via the SSO option in Internet Identity.`;
-    } else {
-      $gate.textContent =
-        `Sorry, this app is only for members of the DFINITY Foundation. ` +
-        `If you are a member, please sign in with your @${ALLOWED_DOMAIN} email ` +
-        `via the SSO option in Internet Identity.`;
-    }
-    $gate.hidden = false;
-    // In DEBUG mode keep the buttons enabled so we can still drive the
-    // canister calls from a wrong-email account (the canister will
-    // reject; that's fine — we want to see the error path).
-    $join.disabled = !DEBUG;
-    $match.disabled = !DEBUG;
-    // `reset` left enabled so a wrong-email user can try again with a
-    // different account; sign-in stays disabled until reload (II flow
-    // is single-shot in this demo).
-    $reset.disabled = false;
+    return;
   }
+
+  // Failed verification: keep the buttons off (in non-DEBUG mode) so the
+  // user can't trigger the doomed canister call.
+  $gate.className = "gate gate-block";
+  const failedItems = (verify?.checks ?? [])
+    .filter((c) => !c.ok)
+    .map((c) => `<li><code>${escapeHtml(c.name)}</code>${c.detail ? ` — ${escapeHtml(c.detail)}` : ""}</li>`)
+    .join("");
+  if (emailFailedDomain && verify?.email) {
+    $gate.innerHTML =
+      `Sorry, <code>${escapeHtml(verify.email)}</code> isn't on the guest list — ` +
+      `Bagel is only open to members of the DFINITY Foundation. ` +
+      `If you are a member, please sign in with your <code>@${ALLOWED_DOMAIN}</code> ` +
+      `email via the SSO option in Internet Identity.`;
+  } else if (verify === null) {
+    $gate.textContent =
+      `Couldn't decode the attribute bundle returned by Internet Identity. ` +
+      `See the log for details.`;
+  } else {
+    $gate.innerHTML =
+      `Local verification failed — the canister would reject this bundle:` +
+      `<ul style="margin: 0.5rem 0 0 1.25rem; padding: 0;">${failedItems}</ul>`;
+  }
+  $gate.hidden = false;
+  // In DEBUG mode keep the buttons enabled so we can still drive the
+  // canister calls from a failing account (the canister will reject;
+  // that's fine — we want to see the error path).
+  $join.disabled = !DEBUG;
+  $match.disabled = !DEBUG;
+  // `reset` left enabled so a wrong-email user can try again with a
+  // different account; sign-in stays disabled until reload (II flow
+  // is single-shot in this demo).
+  $reset.disabled = false;
 }
 
 function escapeHtml(s: string): string {
@@ -393,23 +547,37 @@ async function signIn() {
   log("  attributes: data.len =", signedAttrs.data.length);
   log("  attributes: sig.len  =", signedAttrs.signature.length);
 
-  // Decode the attribute bundle locally so the UI can gate the Join
-  // button on the email's domain BEFORE the user clicks. The bundle
-  // is signed by II — we still rely on the canister to verify that
-  // signature; this client-side decode is purely for UX.
-  let email: string | null = null;
+  // Decode the attribute bundle locally and run the four implicit-field
+  // + email-domain checks the canister will enforce on `join_round`.
+  // Caught here, surfaced in the gate banner — the user gets a clear
+  // verdict without having to click anything (and the canister round-
+  // trip stays as the authoritative gate via `II.verify<system>`).
+  let verifyResult: VerifyResult | null = null;
   try {
     const decoded = decodeAttributes(signedAttrs.data);
-    email = getMapText(decoded, "email");
-    log("  email:", email ?? "(not present)");
     if (DEBUG && "Map" in decoded) {
       log("  [debug] decoded bundle (" + decoded.Map.length + " entries):");
       for (const [k, v] of [...decoded.Map].sort(([a], [b]) => a.localeCompare(b))) {
         log("    " + k + " = " + renderValue(v));
       }
     }
+    const expectedRpOrigin = remapToLegacyDomain(window.location.origin);
+    // pendingNonce already resolved by the time we get here (we awaited
+    // it inside attrsPromise above), so this is a no-cost re-await.
+    const nonceForVerify = await pendingNonce;
+    verifyResult = verifyAttributesLocally(decoded, {
+      expectedRpOrigin,
+      expectedNonce: nonceForVerify,
+      nowNs: BigInt(Date.now()) * 1_000_000n,
+      maxAgeNs: MAX_ATTR_AGE_NS,
+      allowedDomain: ALLOWED_DOMAIN,
+    });
+    log("  local verification: " + (verifyResult.ok ? "✓ all checks pass" : "✗ failed"));
+    for (const c of verifyResult.checks) {
+      log("    " + (c.ok ? "✓" : "✗") + " " + c.name + (c.detail ? " — " + c.detail : ""));
+    }
   } catch (e) {
-    log("  ✗ failed to decode attribute bundle:", String(e));
+    log("  ✗ failed to decode/verify attribute bundle:", String(e));
   }
 
   if (DEBUG) {
@@ -478,7 +646,7 @@ async function signIn() {
   }
 
   const p = inner.getPrincipal().toText();
-  setSignedIn(p, email);
+  setSignedIn(p, verifyResult);
   log("  signed in as", p);
 }
 
