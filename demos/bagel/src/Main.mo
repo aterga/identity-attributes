@@ -32,7 +32,11 @@ import Result     "mo:core/Result";
 ///       attacker can't reuse someone else's bundle.
 persistent actor Bagel {
 
-  let rpOrigin : Text        = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
+  // II currently puts `<canister>.ic0.app` in the bundle's
+  // `implicit:origin` even when the frontend was loaded from `.icp0.io`;
+  // mirror that here so `#OriginMismatch` doesn't fire. Likely an
+  // upstream II quirk worth chasing separately.
+  let rpOrigin : Text        = "https://ufh7l-hiaaa-aaaad-agnza-cai.ic0.app";
   let nonceTtlNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
   let maxAttrAgeNs : Nat     = 5 * 60 * 1_000_000_000;      // 5 min
   let allowedDomain : Text   = "dfinity.org";

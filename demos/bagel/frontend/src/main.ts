@@ -1,4 +1,4 @@
-import { Actor, AnonymousIdentity, HttpAgent, type SignIdentity } from "@icp-sdk/core/agent";
+import { Actor, AnonymousIdentity, HttpAgent, requestIdOf, type SignIdentity } from "@icp-sdk/core/agent";
 import { AuthClient } from "@icp-sdk/auth/client";
 import { IDL } from "@icp-sdk/core/candid";
 import { AttributesIdentity, Ed25519KeyIdentity } from "@icp-sdk/core/identity";
@@ -421,6 +421,32 @@ async function signIn() {
         hexHead(signedAttrs.data), "/", hexTail(signedAttrs.data));
     log("  [debug] sender_info.sig  head/tail:",
         hexHead(signedAttrs.signature), "/", hexTail(signedAttrs.signature));
+
+    // Compute the request_id agent-js would produce for a hypothetical
+    // join_round() body WITH and WITHOUT sender_info. Any IC team member
+    // can take these hashes + the same body fields and verify whether
+    // the IC computes a matching value — giving us a clean repro for
+    // the basic-signature mismatch bug.
+    const sampleBody = {
+      request_type: "call",
+      canister_id: Principal.fromText(BAGEL_CANISTER_ID),
+      method_name: "join_round",
+      arg: new Uint8Array([68, 73, 68, 76, 0, 0]), // empty Candid args
+      sender: inner.getPrincipal(),
+      ingress_expiry: 0n,
+    };
+    const idWithout = requestIdOf(sampleBody);
+    const idWith = requestIdOf({
+      ...sampleBody,
+      sender_info: {
+        signer: signerBytes,
+        info: signedAttrs.data,
+        sig: signedAttrs.signature,
+      },
+    });
+    log("  [debug] sample request_id WITHOUT sender_info:", hex(idWithout));
+    log("  [debug] sample request_id WITH    sender_info:", hex(idWith));
+    log("  [debug] (ingress_expiry pinned to 0n for reproducibility)");
   }
 
   // 4. Wrap the DelegationIdentity returned by signIn with
