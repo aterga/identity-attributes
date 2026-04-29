@@ -109,8 +109,17 @@ The script does the two things a one-shot `icp deploy -e ic` can't:
 `rdmx6-jaaaa-aaaaa-aaadq-cai`) is wired automatically via
 `icp.yaml`'s `settings.environment_variables` — no extra step needed.
 
-If you need more admins than the bootstrap (`Arshavir Ter-Gabrielyan`),
-edit the `admins` list in `main.mo` before deploying.
+The admin allowlist is the actor-class init arg, declared as
+`init_args` on the backend canister in `icp.yaml`:
+
+```yaml
+init_args: '(vec { "Arshavir Ter-Gabrielyan" })'
+```
+
+Edit it before the first deploy. Names must match the verified
+`sso:dfinity.org:name` exactly. The list is stable, so on a running
+canister you'd need `icp deploy --mode reinstall` (state-wiping) to
+change it — or add a controller-gated `setAdmins` setter.
 
 ## Anti-bias design
 

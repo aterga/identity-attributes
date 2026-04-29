@@ -37,11 +37,18 @@ canisters:
       environment_variables:
         trusted_attribute_signers: rdmx6-jaaaa-aaaaa-aaadq-cai,fgte5-ciaaa-aaaad-aaatq-cai
 
-    # No init args — `rpOrigin` is a stable `var` inside the actor with
-    # a controller-gated `setRpOrigin` setter (see `main.mo`). The
-    # mainnet flow in `scripts/deploy.sh` calls it once after the
-    # frontend canister id is known. The Authorization-tier verify
-    # rejects bundles whose `implicit:origin` doesn't match `rpOrigin`.
+    # Bootstrap admin allowlist, passed to the actor class on first
+    # install. Names must match the verified `sso:dfinity.org:name`
+    # exactly. Stable across upgrades — to change the list on a
+    # running canister you'd need `icp deploy --mode reinstall` (which
+    # wipes all state) or to add a controller-gated setter.
+    init_args: '(vec { "Arshavir Ter-Gabrielyan"; "Thomas Gladdines" })'
+
+    # `rpOrigin` is a separate stable `var` with a controller-gated
+    # `setRpOrigin` setter (see `main.mo`). `scripts/deploy.sh` calls
+    # it once after the frontend canister id is known. The
+    # Authorization-tier verify rejects bundles whose `implicit:origin`
+    # doesn't match `rpOrigin`.
 
   # --- Dfinsight frontend — Vite+TypeScript app served from an asset canister.
   - name: dfinsight_frontend

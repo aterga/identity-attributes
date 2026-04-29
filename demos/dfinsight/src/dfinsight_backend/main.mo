@@ -24,7 +24,7 @@ import Blob       "mo:core/Blob";
 /// SSO flow plus the `sso:dfinity.org:name` attribute, which the
 /// canister verifies via `mo:identity-attributes` (which itself reads
 /// the IC `sender_info` from `mo:core/CallerAttributes`).
-persistent actor Dfinsight {
+persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // --------------------------------------------------------------- config --
 
@@ -77,11 +77,17 @@ persistent actor Dfinsight {
   // For the rolling-24h limit.
   let lastPostAt = Map.empty<Principal, Int>();
 
+  // Set from the actor-class init arg on first install. Stable, so it
+  // survives upgrades (init args are re-evaluated on upgrade but the
+  // pre-existing value of a stable `let` is preserved). Edit
+  // `icp.yaml`'s `init_args` for the bootstrap list; on a running
+  // canister, use `--mode reinstall` (state-wiping) or add a setter.
+  //
   // The admin list is public — anyone (signed in or not) can read it
   // via `listAdmins()`, so non-admin DFINITY members who hit the admin
   // page see who *is* allowed. Names must match the verified
   // `sso:dfinity.org:name` value exactly.
-  var admins : [Text] = ["Arshavir Ter-Gabrielyan"];
+  let admins : [Text] = initialAdmins;
 
   // Cache of `principal -> (verifiedName, expiresAt)` populated by
   // `establishAdminSession`. Subsequent admin actions just look up this
