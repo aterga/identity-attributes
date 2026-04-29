@@ -444,6 +444,7 @@ const $match      = document.getElementById("match")  as HTMLButtonElement;
 const $reset      = document.getElementById("reset")  as HTMLButtonElement;
 const $iiToggle   = document.getElementById("iiInstance") as HTMLSelectElement;
 const $iiEndpoint = document.getElementById("iiEndpoint")!;
+const $iiControls = document.getElementById("iiControls")!;
 
 function log(...xs: unknown[]) {
   const line = xs
@@ -882,8 +883,12 @@ renderEndpoint();
 
 // In non-debug mode the live log is just noise for the end user. Hide it
 // outright; everything the user needs to act on is in the gate banner.
+// The II-instance selector is also developer-only — regular users
+// should always go through production II without choosing.
 if (!DEBUG) {
   $log.hidden = true;
+} else {
+  $iiControls.hidden = false;
 }
 
 // In DEBUG mode, instrument globalThis.fetch so the actual CBOR-encoded
