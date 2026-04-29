@@ -173,12 +173,23 @@ persistent actor Bagel {
   /// Leave the waiting pool and drop any existing pairing. Doesn't
   /// un-register — the principal stays known until the canister is
   /// reset, so the caller can re-join without going through II again.
+  ///
+  /// When the caller is currently paired, the *partner* gets returned
+  /// to `pool` (with their email re-attached) instead of being stranded
+  /// in a "floating" state where they're neither paired nor waiting.
+  /// They didn't choose to leave, so we let them be picked up by the
+  /// next arrival without requiring any action on their end. Their UI
+  /// may continue to show a stale "Paired with <caller>" until they
+  /// navigate away or re-Join, but the canister state is consistent
+  /// and a re-arriving caller (or any other DFINITY human) will
+  /// re-pair with them seamlessly.
   public shared ({ caller }) func reset() : async () {
     Map.remove(pool, Principal.compare, caller);
     switch (Map.take(matches, Principal.compare, caller)) {
       case null {};
-      case (?(partner, _)) {
+      case (?(partner, partnerEmail)) {
         Map.remove(matches, Principal.compare, partner);
+        Map.add(pool, Principal.compare, partner, partnerEmail);
       };
     };
   };

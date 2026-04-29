@@ -626,30 +626,52 @@ function setReadyToJoin(email: string) {
   $join.disabled = false;
 }
 
+function lookingBanner(poolSize: bigint | null): string {
+  const subline =
+    poolSize === 1n
+      ? `you're the only one waiting right now. Open this page in another ` +
+        `browser (or sign in with another DFINITY account) to test pairing.`
+      : poolSize !== null && poolSize >= 2n
+        ? `${poolSize} people are waiting — should be paired any second now…`
+        : `keep this tab open. We'll let you know as soon as someone joins.`;
+  return (
+    `<span class="spin" aria-hidden="true">🥯</span> ` +
+    `Looking for a partner — ${subline}`
+  );
+}
+
 function setLooking() {
   $gate.className = "gate gate-busy";
-  $gate.innerHTML =
-    `<span class="spin" aria-hidden="true">🥯</span> ` +
-    `Looking for a partner — keep this tab open. We'll let you know ` +
-    `as soon as someone joins.`;
+  $gate.innerHTML = lookingBanner(null);
   $gate.hidden = false;
   $signIn.hidden = true;
   $join.hidden = true;
   $reset.hidden = false;
   $reset.disabled = false;
 
-  // Poll the canister for a match every 3 s. The partner who triggers
-  // the pairing learns from `join_round`'s own response — but the user
-  // who got here via `#Waiting` finds out via this poll.
+  // Poll the canister every 3 s. We fetch both:
+  //  - `my_match()`: did someone show up while we were waiting?
+  //    (The partner who triggered the pairing learns from
+  //    `join_round`'s own response — but the user who got here via
+  //    `#Waiting` finds out here.)
+  //  - `pool_size()`: how many people (incl. us) are alone in the
+  //    pool right now? Surfaces a useful "you're solo, try another
+  //    browser" hint when the user is the only DFINITY human awake.
   stopLookingPoll();
   lookingPollHandle = window.setInterval(async () => {
     if (!bagel) return;
     try {
-      const opt = await bagel.my_match();
+      const [opt, size] = await Promise.all([
+        bagel.my_match(),
+        bagel.pool_size(),
+      ]);
       const partner = opt[0];
       if (partner !== undefined) {
         setPaired(partner);
+        return;
       }
+      // Still waiting — refresh the subline only if the count changed.
+      $gate.innerHTML = lookingBanner(size);
     } catch (e) {
       log("  poll error:", String(e));
     }
