@@ -502,6 +502,19 @@ function setSignedIn(
   $reset.disabled = false;
 }
 
+function showVerifying() {
+  $gate.className = "gate gate-busy";
+  $gate.innerHTML =
+    `<span class="spin" aria-hidden="true">🥯</span> ` +
+    `Verifying your DFINITY membership with the canister…`;
+  $gate.hidden = false;
+  $signIn.disabled = true;
+  $join.disabled = true;
+  $match.disabled = true;
+  $reset.disabled = true;
+  $iiToggle.disabled = true;
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
@@ -680,6 +693,7 @@ async function signIn() {
   //    employee. From then on, `join_round()` etc. just look the caller
   //    up — no bundle needed on subsequent calls.
   log("→ bagel.register() — canister verifies the bundle and remembers caller");
+  showVerifying();
   let registerOutcome: RegisterResult | { thrown: string } | null = null;
   try {
     registerOutcome = await bagelForRegister.register();
@@ -763,14 +777,57 @@ $iiToggle.addEventListener("change", () => {
 $iiToggle.value = iiInstance;
 renderEndpoint();
 
+// In non-debug mode the live log is just noise for the end user. Hide it
+// outright; everything the user needs to act on is in the gate banner.
+if (!DEBUG) {
+  $log.hidden = true;
+}
+
+// In DEBUG mode, instrument globalThis.fetch so the actual CBOR-encoded
+// request body that goes on the wire for /api/v4/.../call (and the
+// related /read_state) is captured. This is the body the IC computes
+// the request_id from and verifies the basic signature against. Pairing
+// this dump with our agent-side request_id (logged below) lets anyone
+// reproduce the verification offline and pinpoint where (if at all)
+// agent-js's hash diverges from the IC's.
+if (DEBUG) {
+  const origFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : (input as Request).url;
+    const isCall = url.includes("/canister/") && url.endsWith("/call");
+    const isReadState = url.includes("/canister/") && url.endsWith("/read_state");
+    if ((isCall || isReadState) && init?.body) {
+      const b = init.body;
+      let bytes: Uint8Array | null = null;
+      if (b instanceof Uint8Array) bytes = b;
+      else if (b instanceof ArrayBuffer) bytes = new Uint8Array(b);
+      else if (ArrayBuffer.isView(b)) bytes = new Uint8Array(b.buffer);
+      if (bytes) {
+        const tag = isCall ? "call" : "read_state";
+        log(`  [debug] ${tag} body (${bytes.length} bytes): ${hex(bytes)}`);
+      }
+    }
+    return origFetch(input, init);
+  };
+}
+
 log(`bagel canister: ${BAGEL_CANISTER_ID}`);
 log(`IC host:        ${IC_HOST}`);
 log(`II instance:    ${iiInstance}`);
 log(`II endpoint:    ${identityProviderFor(iiInstance)}`);
 log(`request keys:   ${JSON.stringify(requestKeys())}`);
 if (DEBUG) {
-  log("DEBUG mode ON  — sender_info bytes will be dumped, and join_round()");
-  log("                 will additionally be called with a bare delegation.");
+  log("DEBUG mode ON  — sender_info bytes + full /call CBOR body will be");
+  log("                 dumped to this log. (In non-debug mode this whole");
+  log("                 log section is hidden from the user.)");
 }
 log("");
 

@@ -64,7 +64,13 @@
       }
       .gate-ok    { background: #e8f7ee; border: 1px solid #b6e0c5; color: #1e6b3a; }
       .gate-block { background: #fdecec; border: 1px solid #f4b9b9; color: #8a1f1f; }
+      .gate-busy  { background: #fff8e1; border: 1px solid #f0e2a4; color: #6a5512; }
       .gate code  { background: #fff5; padding: 0.05rem 0.3rem; border-radius: 3px; }
+      .spin {
+        display: inline-block;
+        animation: spin 1.4s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
     </style>
   </head>
   <body>
