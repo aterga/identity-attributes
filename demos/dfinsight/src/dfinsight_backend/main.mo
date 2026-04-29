@@ -9,6 +9,7 @@ import Int        "mo:core/Int";
 import Nat        "mo:core/Nat";
 import Nat8       "mo:core/Nat8";
 import Array      "mo:core/Array";
+import VarArray   "mo:core/VarArray";
 import Iter       "mo:core/Iter";
 import Order      "mo:core/Order";
 import Result     "mo:core/Result";
@@ -18,7 +19,7 @@ import Blob       "mo:core/Blob";
 /// Dfinsight — a "common matters of interest" board.
 ///
 /// Users sign in 1-click via `https://id.ai/authorize?sso=dfinity.org`,
-/// post one Issue per 24h, and upvote oihers'. They never see scores.
+/// post one Issue per 24h, and upvote others'. They never see scores.
 /// Admins (DFINITY members on a fixed allowlist) sign in with the same
 /// SSO flow plus the `sso:dfinity.org:name` attribute, which the
 /// canister verifies via `mo:identity-attributes` (which itself reads
@@ -30,12 +31,12 @@ persistent actor Dfinsight {
   // Origin of *this* dapp (the relying party) — must match the
   // `implicit:origin` field that id.ai bakes into attribute bundles.
   //
-  // Defaults to the local Vite dev server. Before deploying to
-  // mainnet, edit this string to your frontend canister URL, e.g.
-  // `"https://<frontend-id>.icp0.io"`. Mismatch produces
-  // `#OriginMismatch` from `mo:identity-attributes` on every admin
-  // verify, which is loud and easy to diagnose.
-  let rpOrigin : Text = "http://localhost:5173";
+  // Defaults to the local Vite dev server. For mainnet, the controller
+  // calls `setRpOrigin("https://<frontend-id>.icp0.io")` once after the
+  // first deploy mints the frontend canister id. Stable, so it
+  // survives upgrades. Mismatch produces `#OriginMismatch` from
+  // `mo:identity-attributes` on every admin verify.
+  var rpOrigin : Text = "http://localhost:5173";
 
   // 5-minute windows are the same defaults the bagel demo uses.
   let nonceTtlNs   : Nat = 5 * 60 * 1_000_000_000;
@@ -146,7 +147,7 @@ persistent actor Dfinsight {
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
-  /// delegation from id.ai, or any oiher authenticated identity) can
+  /// delegation from id.ai, or any other authenticated identity) can
   /// post one Issue per 24h.
   public shared ({ caller }) func createIssue(body : Text) : async Result.Result<Nat, PostError> {
     if (Principal.isAnonymous(caller)) return #err(#NotSignedIn);
@@ -203,7 +204,7 @@ persistent actor Dfinsight {
       };
     };
 
-    let alreadyVoted = Map.contains(voters, Principal.compare, caller);
+    let alreadyVoted = Map.containsKey(voters, Principal.compare, caller);
     if (alreadyVoted) {
       Map.remove(voters, Principal.compare, caller);
       Map.add(issues, Nat.compare, id, { issue with upvotes = issue.upvotes - 1 });
@@ -228,7 +229,7 @@ persistent actor Dfinsight {
 
     Array.map<Issue, IssueForUser>(shuffled, func(i) {
       let voted = switch (Map.get(upvoters, Nat.compare, i.id)) {
-        case (?v) Map.contains(v, Principal.compare, caller);
+        case (?v) Map.containsKey(v, Principal.compare, caller);
         case null false;
       };
       let responded = switch (i.response) { case (?_) true; case null false };
@@ -270,7 +271,7 @@ persistent actor Dfinsight {
   // Full Authorization-tier verify against `mo:identity-attributes`.
   // Called only by `establishAdminSession`. Returns the verified name
   // on success.
-  func verifyAdminAttributes(caller : Principal) : Result.Result<Text, AdminError> {
+  func verifyAdminAttributes<system>(caller : Principal) : Result.Result<Text, AdminError> {
     let attrs = switch (II.verify<system>({
       policy = #Authorization {
         expectedOrigin = rpOrigin;
@@ -316,7 +317,7 @@ persistent actor Dfinsight {
   /// rest of the admin actions in this session are just a Map lookup.
   /// The frontend calls this immediately after `signInAdmin`.
   public shared ({ caller }) func establishAdminSession() : async Result.Result<{ name : Text; expiresAt : Int }, AdminError> {
-    switch (verifyAdminAttributes(caller)) {
+    switch (verifyAdminAttributes<system>(caller)) {
       case (#err e) #err e;
       case (#ok name) {
         let expiresAt = Time.now() + adminSessionNs;
@@ -368,6 +369,23 @@ persistent actor Dfinsight {
     #ok()
   };
 
+  // -------------------------------------------------- controller API --
+
+  /// Set the relying-party origin. Must be the exact frontend URL
+  /// (e.g. `https://<frontend-id>.icp0.io`, no trailing slash) that
+  /// id.ai will see in the browser at admin sign-in time. Restricted
+  /// to canister controllers — typical mainnet flow is one call right
+  /// after `icp deploy -e ic` mints the frontend canister id.
+  public shared ({ caller }) func setRpOrigin(origin : Text) : async Result.Result<(), Text> {
+    if (not Principal.isController(caller)) return #err("not a controller");
+    rpOrigin := origin;
+    #ok()
+  };
+
+  /// Reads back the current origin so a deploy script can confirm the
+  /// `setRpOrigin` call landed before declaring the deploy done.
+  public query func getRpOrigin() : async Text { rpOrigin };
+
   // ------------------------------------------------------- helpers --
 
   // Fisher-Yates seeded by `entropy`. Each draw consumes a few bytes;
@@ -378,7 +396,7 @@ persistent actor Dfinsight {
     let n = arr.size();
     if (n <= 1) return arr;
     let bytes = Blob.toArray(entropy);
-    let work = Array.thaw<Issue>(arr);
+    let work = VarArray.fromArray<Issue>(arr);
     var i = n - 1 : Nat;
     var b = 0;
     while (i > 0) {
@@ -397,6 +415,6 @@ persistent actor Dfinsight {
       work[r] := tmp;
       i -= 1;
     };
-    Array.freeze<Issue>(work)
+    Array.fromVarArray<Issue>(work)
   };
 };

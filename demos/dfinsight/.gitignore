@@ -2,6 +2,7 @@
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 # icp / dfx
 .dfx/
@@ -10,6 +11,7 @@ target/
 
 # motoko / mops
 .mops/
+.build/
 
 # generated bindings (regen on build)
 src/dfinsight_frontend/src/declarations/

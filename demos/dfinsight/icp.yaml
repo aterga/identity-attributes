@@ -1,33 +1,85 @@
-# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v0.2.0/docs/schemas/icp-yaml-schema.json
-
+# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v0.1.0/docs/schemas/icp-yaml-schema.json
+#
+# icp-cli project config (replaces the old dfx.json). See
+# https://cli.internetcomputer.org/0.2/ for the full reference.
+#
+# Build:  icp deploy                 (local)
+#         icp deploy -e ic           (mainnet)
+#
 # Dfinsight: an SSO-gated "matters of interest" board.
 #
 # Two canisters:
 #   - dfinsight_backend  — Motoko, holds Issues, upvotes, admin verify
 #   - dfinsight_frontend — React+Vite asset canister
-#
-# trusted_attribute_signers MUST be set on dfinsight_backend at install
-# time to the II canister principal — oiherwise the IC strips
-# `sender_info` and admin verification breaks. See README.
 
 canisters:
+  # --- Dfinsight backend — the identity-attributes gated matters board.
   - name: dfinsight_backend
     build:
       steps:
+        # Needs `mops` on PATH — install from https://mops.one/docs/install
+        # if `scripts/build-backend.sh` fails with 'mops: command not found'.
+        # The script runs `mops install` + `moc --release` + emits the .did.
         - type: script
           commands:
             - "scripts/build-backend.sh"
             - 'cp src/dfinsight_backend/.build/dfinsight_backend.wasm "$ICP_WASM_OUTPUT_PATH"'
-    # No init args — `rpOrigin` is a `var` inside the actor, set after
-    # the first deploy via the controller-gated `setRpOrigin`. Edit
-    # `main.mo` if you want to bake in a non-default origin instead.
 
+    settings:
+      # Trusted signers for ICRC-3 certified attribute bundles. Without
+      # one of these, the IC's ingress layer strips `sender_info` before
+      # it reaches the canister and `II.verify<system>` returns
+      # `#NoAttributes`.
+      #
+      # Comma-separated list (parsed by `mo:core/CallerAttributes`).
+      #   - `rdmx6-jaaaa-aaaaa-aaadq-cai` — Internet Identity production
+      #   - `fgte5-ciaaa-aaaad-aaatq-cai` — Internet Identity beta
+      environment_variables:
+        trusted_attribute_signers: rdmx6-jaaaa-aaaaa-aaadq-cai,fgte5-ciaaa-aaaad-aaatq-cai
+
+    # No init args — `rpOrigin` is a stable `var` inside the actor with
+    # a controller-gated `setRpOrigin` setter (see `main.mo`). The
+    # mainnet flow in `scripts/deploy.sh` calls it once after the
+    # frontend canister id is known. The Authorization-tier verify
+    # rejects bundles whose `implicit:origin` doesn't match `rpOrigin`.
+
+  # --- Dfinsight frontend — Vite+TypeScript app served from an asset canister.
   - name: dfinsight_frontend
     build:
       steps:
+        # Pin a specific asset-canister WASM from the dfinity/sdk repo.
+        # Bump when you want newer asset-canister features.
+        - type: pre-built
+          url: https://github.com/dfinity/sdk/raw/89243f2268b6d0ec77d589b7b1b27af931f70edd/src/distributed/assetstorage.wasm.gz
+          sha256: b312a16c3179cf8384afa852e468c1333b7439d4c5a39f26df69b12320f629f8
         - type: script
           commands:
-            - "npm --prefix src/dfinsight_frontend run build"
-            - 'cp -r src/dfinsight_frontend/dist/* "$ICP_ASSETS_OUTPUT_PATH"/'
-    dependencies:
-      - dfinsight_backend
+            # npm workspace install — the lockfile lives at the demo
+            # root, not under src/dfinsight_frontend.
+            - npm ci
+            - npm --prefix src/dfinsight_frontend run build
+
+    sync:
+      steps:
+        # `icp deploy` uploads everything under this directory as static
+        # assets after the canister is installed.
+        - type: assets
+          dirs:
+            - src/dfinsight_frontend/dist
+
+# Local replica (used by `icp network start`).
+networks:
+  - name: local
+    mode: managed
+    gateway:
+      bind: 127.0.0.1
+      port: 4943
+
+# Deployment targets. `-e local` / `-e ic` on `icp deploy`, `icp canister`, …
+environments:
+  - name: local
+    network: local
+    canisters: [dfinsight_backend, dfinsight_frontend]
+  - name: ic
+    network: ic
+    canisters: [dfinsight_backend, dfinsight_frontend]

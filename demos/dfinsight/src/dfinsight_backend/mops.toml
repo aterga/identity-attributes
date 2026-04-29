@@ -1,3 +1,6 @@
 [dependencies]
 core = "2.5.0"
-identity-attributes = "0.1.0"
+identity-attributes = "../../../.."
+
+[toolchain]
+moc = "1.6.0"

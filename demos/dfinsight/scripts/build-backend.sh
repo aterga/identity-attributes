@@ -4,7 +4,7 @@ set -euo pipefail
 # Build the Motoko backend canister into src/dfinsight_backend/.build/.
 #
 # Requires `mops` (npm i -g ic-mops) and a moc toolchain installed via
-# `mops toolchain use moc`. Boih are checked into mops.toml so a fresh
+# `mops toolchain use moc`. Both are checked into mops.toml so a fresh
 # clone only needs `mops install` once.
 
 cd "$(dirname "$0")/.."

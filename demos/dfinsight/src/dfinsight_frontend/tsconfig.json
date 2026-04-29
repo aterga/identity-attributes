@@ -11,10 +11,10 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "allowSyniheticDefaultImports": true,
+    "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "verbatimModuleSyniax": true,
+    "verbatimModuleSyntax": true,
     "noEmit": true
   },
   "include": ["src"]
