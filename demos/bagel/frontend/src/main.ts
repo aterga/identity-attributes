@@ -440,7 +440,6 @@ const $gate       = document.getElementById("gate")!;
 const $log        = document.getElementById("log")!;
 const $signIn     = document.getElementById("signIn") as HTMLButtonElement;
 const $join       = document.getElementById("join")   as HTMLButtonElement;
-const $match      = document.getElementById("match")  as HTMLButtonElement;
 const $reset      = document.getElementById("reset")  as HTMLButtonElement;
 const $iiToggle   = document.getElementById("iiInstance") as HTMLSelectElement;
 const $iiEndpoint = document.getElementById("iiEndpoint")!;
@@ -545,20 +544,9 @@ function setSignedIn(
     );
 
   if (registered) {
-    // Successful end state — Sign In has done its job, hide it. The
-    // round-trip buttons appear here for the first time.
-    $gate.className = "gate gate-ok";
-    $gate.innerHTML =
-      `Welcome, <code>${escapeHtml((register as { ok: { email: string } }).ok.email)}</code> ` +
-      `— canister verified the bundle, you're cleared for coffee.`;
-    $gate.hidden = false;
-    $signIn.hidden = true;
-    $join.hidden = false;
-    $match.hidden = false;
-    $reset.hidden = false;
-    $join.disabled = false;
-    $match.disabled = false;
-    $reset.disabled = false;
+    // Hand off to `setReadyToJoin` — the post-sign-in state is just
+    // "verified human, ready to find a partner" with one action.
+    setReadyToJoin((register as { ok: { email: string } }).ok.email);
     return;
   }
 
@@ -599,9 +587,86 @@ function setSignedIn(
   // Tell the user to reload (which kicks off a fresh nonce + AuthClient).
   $signIn.hidden = true;
   $join.hidden = true;
-  $match.hidden = true;
   $reset.hidden = true;
   $iiToggle.disabled = false;
+}
+
+// ---------------------------------------------------------- post-sign-in --
+// Three states after registration. At any time exactly one button is
+// visible — "one view, one action".
+//
+//   Ready    : "Welcome <email>"                          → [Join round]
+//   Looking  : "Looking for a partner… 🥯"   (auto-poll)  → [Leave round]
+//   Paired   : "Paired with <partner_email>"              → [Leave round]
+//
+// `Reset` reuses the bagel canister's `reset()` method and is rendered
+// as "Leave round" in this restructured UI.
+
+let signedInEmail: string | null = null;
+let lookingPollHandle: number | null = null;
+
+function stopLookingPoll() {
+  if (lookingPollHandle !== null) {
+    clearInterval(lookingPollHandle);
+    lookingPollHandle = null;
+  }
+}
+
+function setReadyToJoin(email: string) {
+  signedInEmail = email;
+  stopLookingPoll();
+  $gate.className = "gate gate-ok";
+  $gate.innerHTML =
+    `Welcome, <code>${escapeHtml(email)}</code>. Click <em>Join round</em> ` +
+    `to be paired with another DFINITY human for coffee.`;
+  $gate.hidden = false;
+  $signIn.hidden = true;
+  $join.hidden = false;
+  $reset.hidden = true;
+  $join.disabled = false;
+}
+
+function setLooking() {
+  $gate.className = "gate gate-busy";
+  $gate.innerHTML =
+    `<span class="spin" aria-hidden="true">🥯</span> ` +
+    `Looking for a partner — keep this tab open. We'll let you know ` +
+    `as soon as someone joins.`;
+  $gate.hidden = false;
+  $signIn.hidden = true;
+  $join.hidden = true;
+  $reset.hidden = false;
+  $reset.disabled = false;
+
+  // Poll the canister for a match every 3 s. The partner who triggers
+  // the pairing learns from `join_round`'s own response — but the user
+  // who got here via `#Waiting` finds out via this poll.
+  stopLookingPoll();
+  lookingPollHandle = window.setInterval(async () => {
+    if (!bagel) return;
+    try {
+      const opt = await bagel.my_match();
+      const partner = opt[0];
+      if (partner !== undefined) {
+        setPaired(partner);
+      }
+    } catch (e) {
+      log("  poll error:", String(e));
+    }
+  }, 3000);
+}
+
+function setPaired(partnerEmail: string) {
+  stopLookingPoll();
+  $gate.className = "gate gate-ok";
+  $gate.innerHTML =
+    `🥯 You're paired with <code>${escapeHtml(partnerEmail)}</code> ` +
+    `— say hi and grab a coffee!`;
+  $gate.hidden = false;
+  $signIn.hidden = true;
+  $join.hidden = true;
+  $reset.hidden = false;
+  $reset.disabled = false;
 }
 
 function showVerifying() {
@@ -612,9 +677,18 @@ function showVerifying() {
   $gate.hidden = false;
   $signIn.disabled = true;
   $join.disabled = true;
-  $match.disabled = true;
   $reset.disabled = true;
   $iiToggle.disabled = true;
+}
+
+function showJoining() {
+  $gate.className = "gate gate-busy";
+  $gate.innerHTML =
+    `<span class="spin" aria-hidden="true">🥯</span> ` +
+    `Joining the round…`;
+  $gate.hidden = false;
+  $join.disabled = true;
+  $reset.disabled = true;
 }
 
 function escapeHtml(s: string): string {
@@ -825,29 +899,56 @@ function formatJoin(r: JoinResult): string {
 
 async function join() {
   if (!bagel) return;
-
   log("→ calling join_round()");
+  showJoining();
   try {
     const res = await bagel.join_round();
     log("  result:", formatJoin(res));
     log("  raw:", res);
+    if ("ok" in res) {
+      if ("Paired" in res.ok) {
+        setPaired(res.ok.Paired.email);
+      } else {
+        setLooking();
+      }
+    } else {
+      // `#NotRegistered` shouldn't happen here (we just registered),
+      // but surface it cleanly if it does.
+      $gate.className = "gate gate-block";
+      $gate.textContent = "Canister says we aren't registered. Reload to try again.";
+      $gate.hidden = false;
+      $join.hidden = true;
+      $reset.hidden = true;
+    }
   } catch (e) {
     log("  ERROR:", String(e));
+    $gate.className = "gate gate-block";
+    $gate.innerHTML = `Couldn't join the round: <code>${escapeHtml(String(e))}</code>.`;
+    $gate.hidden = false;
+    if (signedInEmail !== null) {
+      // Let them retry — back to ready state.
+      $join.hidden = false;
+      $join.disabled = false;
+      $reset.hidden = true;
+    }
   }
 }
 
-async function myMatch() {
-  if (!bagel) return;
-  log("→ calling my_match()");
-  const opt = await bagel.my_match();
-  log("  result:", opt.length === 0 ? "no match yet" : opt[0]);
-}
-
-async function reset() {
+async function leaveRound() {
   if (!bagel) return;
   log("→ calling reset()");
-  await bagel.reset();
-  log("  done");
+  $reset.disabled = true;
+  try {
+    await bagel.reset();
+    log("  done");
+  } catch (e) {
+    log("  ERROR:", String(e));
+  }
+  // Back to "ready to join" — the email is still trusted by the canister
+  // (`registered` map persists), so no re-sign-in needed.
+  if (signedInEmail !== null) {
+    setReadyToJoin(signedInEmail);
+  }
 }
 
 // ------------------------------------------------------------ wire up UI --
@@ -855,8 +956,7 @@ $signIn.addEventListener("click", () => {
   signIn().catch((e) => log("ERROR:", String(e)));
 });
 $join.addEventListener("click", () => join());
-$match.addEventListener("click", () => myMatch());
-$reset.addEventListener("click", () => reset());
+$reset.addEventListener("click", () => leaveRound());
 
 // Flipping the toggle before sign-in changes which II the eventual click
 // will talk to. After sign-in we disable it (see `setSignedIn`). A full
