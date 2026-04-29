@@ -22,6 +22,11 @@ canisters:
         - type: script
           commands:
             - mops install
+            # Run unit tests before building. A red test fails the
+            # deploy, surfacing regressions like the rpOrigin transient
+            # mishap (where `let` defaults to stable in `persistent
+            # actor`) before the wasm goes anywhere near a canister.
+            - mops test
             - $(mops toolchain bin moc) src/Main.mo $(mops sources) -o "$ICP_WASM_OUTPUT_PATH"
 
     settings:

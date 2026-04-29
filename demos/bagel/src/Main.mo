@@ -5,6 +5,7 @@ import Principal  "mo:core/Principal";
 import Text       "mo:core/Text";
 import Iter       "mo:core/Iter";
 import Result     "mo:core/Result";
+import Origin     "./Origin";
 
 /// Bagel — a pairs-you-for-coffee demo, gated to @dfinity.org users via
 /// Internet Identity certified attributes.
@@ -38,25 +39,6 @@ import Result     "mo:core/Result";
 ///       attacker can't reuse someone else's bundle.
 persistent actor Bagel {
 
-  /// Mirror of II's `remapToLegacyDomain` from
-  /// dfinity/internet-identity:src/frontend/src/lib/utils/iiConnection.ts:998.
-  /// II rewrites `https://<subdomain>.icp0.io` (with optional `.raw`)
-  /// → `https://<subdomain>.ic0.app` to keep the principal-derivation
-  /// origin stable across the two domains, regardless of which one the
-  /// user actually loads the page from. The canister applies the same
-  /// remap so its `expectedOrigin` matches what II attests to in the
-  /// bundle's `implicit:origin`.
-  func remapToLegacyDomain(origin : Text) : Text {
-    let prefix = "https://";
-    let suffix = ".icp0.io";
-    if (not Text.startsWith(origin, #text prefix)) { return origin };
-    if (not Text.endsWith(origin, #text suffix))   { return origin };
-    let withoutPrefix = Text.trimStart(origin, #text prefix);
-    let subdomain     = Text.trimEnd(withoutPrefix, #text suffix);
-    if (subdomain == "") { return origin };
-    prefix # subdomain # ".ic0.app"
-  };
-
   // The canonical origin where this app is hosted — the new `.icp0.io`
   // domain. Both `<id>.icp0.io` and the legacy `<id>.ic0.app` URLs
   // serve the same asset canister, but II's `remapToLegacyDomain`
@@ -65,11 +47,20 @@ persistent actor Bagel {
   // `.ic0.app` form in the bundle's `implicit:origin`. We feed our
   // canonical origin through the same remap so `expectedOrigin`
   // matches what II actually puts in the bundle.
-  let rpOriginCanonical : Text = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
-  let rpOrigin : Text          = remapToLegacyDomain(rpOriginCanonical);
-  let nonceTtlNs : Nat         = 5 * 60 * 1_000_000_000;      // 5 min
-  let maxAttrAgeNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
-  let allowedDomain : Text     = "dfinity.org";
+  //
+  // `transient` is critical here — in a `persistent actor`, regular
+  // `let` bindings are evaluated on the *initial* install only, and
+  // their values are preserved across upgrades. We changed the
+  // expected-origin form after the canister was first deployed, but
+  // the upgrade kept the original `icp0.io` value, which is why earlier
+  // attempts kept failing with `OriginMismatch`. `transient` re-evaluates
+  // the right-hand side on every upgrade, so source-level changes
+  // actually take effect.
+  transient let rpOriginCanonical : Text = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
+  transient let rpOrigin : Text          = Origin.remapToLegacyDomain(rpOriginCanonical);
+  transient let nonceTtlNs : Nat         = 5 * 60 * 1_000_000_000;      // 5 min
+  transient let maxAttrAgeNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
+  transient let allowedDomain : Text     = "dfinity.org";
 
   // Nonces are canister-global (see module doc) — stored under and
   // consumed against the anonymous principal, regardless of who's calling.
