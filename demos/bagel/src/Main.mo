@@ -38,14 +38,38 @@ import Result     "mo:core/Result";
 ///       attacker can't reuse someone else's bundle.
 persistent actor Bagel {
 
-  // II currently puts `<canister>.ic0.app` in the bundle's
-  // `implicit:origin` even when the frontend was loaded from `.icp0.io`;
-  // mirror that here so `#OriginMismatch` doesn't fire. Likely an
-  // upstream II quirk worth chasing separately.
-  let rpOrigin : Text        = "https://ufh7l-hiaaa-aaaad-agnza-cai.ic0.app";
-  let nonceTtlNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
-  let maxAttrAgeNs : Nat     = 5 * 60 * 1_000_000_000;      // 5 min
-  let allowedDomain : Text   = "dfinity.org";
+  /// Mirror of II's `remapToLegacyDomain` from
+  /// dfinity/internet-identity:src/frontend/src/lib/utils/iiConnection.ts:998.
+  /// II rewrites `https://<subdomain>.icp0.io` (with optional `.raw`)
+  /// → `https://<subdomain>.ic0.app` to keep the principal-derivation
+  /// origin stable across the two domains, regardless of which one the
+  /// user actually loads the page from. The canister applies the same
+  /// remap so its `expectedOrigin` matches what II attests to in the
+  /// bundle's `implicit:origin`.
+  func remapToLegacyDomain(origin : Text) : Text {
+    let prefix = "https://";
+    let suffix = ".icp0.io";
+    if (not Text.startsWith(origin, #text prefix)) { return origin };
+    if (not Text.endsWith(origin, #text suffix))   { return origin };
+    let withoutPrefix = Text.trimStart(origin, #text prefix);
+    let subdomain     = Text.trimEnd(withoutPrefix, #text suffix);
+    if (subdomain == "") { return origin };
+    prefix # subdomain # ".ic0.app"
+  };
+
+  // The canonical origin where this app is hosted — the new `.icp0.io`
+  // domain. Both `<id>.icp0.io` and the legacy `<id>.ic0.app` URLs
+  // serve the same asset canister, but II's `remapToLegacyDomain`
+  // rewrites `.icp0.io` → `.ic0.app` for principal stability. Whatever
+  // URL the user actually loaded the page from, II will attest to the
+  // `.ic0.app` form in the bundle's `implicit:origin`. We feed our
+  // canonical origin through the same remap so `expectedOrigin`
+  // matches what II actually puts in the bundle.
+  let rpOriginCanonical : Text = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
+  let rpOrigin : Text          = remapToLegacyDomain(rpOriginCanonical);
+  let nonceTtlNs : Nat         = 5 * 60 * 1_000_000_000;      // 5 min
+  let maxAttrAgeNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
+  let allowedDomain : Text     = "dfinity.org";
 
   // Nonces are canister-global (see module doc) — stored under and
   // consumed against the anonymous principal, regardless of who's calling.
@@ -97,6 +121,8 @@ persistent actor Bagel {
   public shared ({ caller }) func register() : async Result.Result<{ email : Text }, RegisterError> {
     let attrs = switch (II.verify<system>({
       policy = #Authorization {
+        // `rpOrigin` is the legacy-domain form (see remapToLegacyDomain
+        // above) — matches what II actually attests to in the bundle.
         expectedOrigin = rpOrigin;
         maxAgeNs       = maxAttrAgeNs;
       };

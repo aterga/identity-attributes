@@ -544,18 +544,26 @@ function setSignedIn(
     );
 
   if (registered) {
+    // Successful end state — Sign In has done its job, hide it. The
+    // round-trip buttons appear here for the first time.
     $gate.className = "gate gate-ok";
     $gate.innerHTML =
       `Welcome, <code>${escapeHtml((register as { ok: { email: string } }).ok.email)}</code> ` +
       `— canister verified the bundle, you're cleared for coffee.`;
     $gate.hidden = false;
+    $signIn.hidden = true;
+    $join.hidden = false;
+    $match.hidden = false;
+    $reset.hidden = false;
     $join.disabled = false;
     $match.disabled = false;
     $reset.disabled = false;
     return;
   }
 
-  // Anything else: block the buttons (unless DEBUG) and explain why.
+  // Failure path — explain why, keep the round-trip buttons hidden, and
+  // re-enable Sign In so the user can retry (e.g. with a different
+  // account).
   $gate.className = "gate gate-block";
   if (registerRejected) {
     const err = (register as { err: unknown }).err;
@@ -585,15 +593,14 @@ function setSignedIn(
       `<ul style="margin: 0.5rem 0 0 1.25rem; padding: 0;">${failedItems}</ul>`;
   }
   $gate.hidden = false;
-  // In DEBUG mode keep the buttons enabled so we can still drive the
-  // canister calls from a failing account (the canister will reject;
-  // that's fine — we want to see the error path).
-  $join.disabled = !DEBUG;
-  $match.disabled = !DEBUG;
-  // `reset` left enabled so a wrong-email user can try again with a
-  // different account; sign-in stays disabled until reload (II flow
-  // is single-shot in this demo).
-  $reset.disabled = false;
+  // The pre-fetched nonce was consumed by the failed register attempt,
+  // so re-enabling Sign In would just hit `#UnknownNonce` next time.
+  // Tell the user to reload (which kicks off a fresh nonce + AuthClient).
+  $signIn.hidden = true;
+  $join.hidden = true;
+  $match.hidden = true;
+  $reset.hidden = true;
+  $iiToggle.disabled = false;
 }
 
 function showVerifying() {
@@ -934,6 +941,15 @@ authClient = new AuthClient({
 });
 log("✓ AuthClient initialised (pre-click, Ed25519 session key)");
 
+// Initial gate state: Sign In is disabled (set in HTML) until the nonce
+// pre-fetch resolves. Surface the wait so the user knows something is
+// happening and that they can't interact yet.
+$gate.className = "gate gate-busy";
+$gate.innerHTML =
+  `<span class="spin" aria-hidden="true">🥯</span> ` +
+  `Preparing a fresh challenge from the canister…`;
+$gate.hidden = false;
+
 pendingNonce = (async () => {
   const anonAgent = await makeAgent(new AnonymousIdentity());
   const bootstrap = makeActor(anonAgent);
@@ -943,8 +959,21 @@ pendingNonce = (async () => {
   return n as Uint8Array;
 })();
 pendingNonce
-  .then((n) => log("✓ pre-fetched nonce:", n))
-  .catch((e) => log("✗ nonce pre-fetch failed:", String(e)));
+  .then((n) => {
+    log("✓ pre-fetched nonce:", n);
+    // Nonce is in hand — let the user click Sign In, and clear the
+    // "preparing" banner.
+    $signIn.disabled = false;
+    $gate.hidden = true;
+  })
+  .catch((e) => {
+    log("✗ nonce pre-fetch failed:", String(e));
+    $gate.className = "gate gate-block";
+    $gate.textContent =
+      "Couldn't reach the bagel canister to get a fresh challenge. " +
+      "Reload the page to try again.";
+    $gate.hidden = false;
+  });
 
 log("");
 log("1. Sign in with II — single popup delivers a delegation + a signed");
