@@ -29,8 +29,16 @@ done
 
 cd "$(dirname "$0")/.."
 
-echo "[1/4] Pre-creating canisters on '$ENV'..."
+# Each `icp` invocation may prompt for the identity password. Print
+# what it's for *before* the prompt so the user knows which step is
+# asking. Using stderr so the messages aren't swallowed by command
+# substitution (BACKEND_ID=$(read_id ...)).
+log() { echo "==> $*" >&2; }
+
+log "[1/6] Creating canister: dfinsight_backend ($ENV)"
 icp canister create dfinsight_backend  -e "$ENV" "${PASSTHROUGH[@]}"
+
+log "[2/6] Creating canister: dfinsight_frontend ($ENV)"
 icp canister create dfinsight_frontend -e "$ENV" "${PASSTHROUGH[@]}"
 
 read_id() {
@@ -39,27 +47,34 @@ read_id() {
     | awk '/^Canister Id:/ {print $3; exit}'
 }
 
+log "[3/6] Reading canister ids (status x2)"
 BACKEND_ID=$(read_id dfinsight_backend)
 FRONTEND_ID=$(read_id dfinsight_frontend)
-
-echo "[2/4] Backend  : $BACKEND_ID"
-echo "      Frontend : $FRONTEND_ID"
+log "      Backend  : $BACKEND_ID"
+log "      Frontend : $FRONTEND_ID"
 
 case "$ENV" in
-  ic)    ORIGIN="https://${FRONTEND_ID}.icp0.io" ;;
-  local) ORIGIN="http://${FRONTEND_ID}.localhost:4943" ;;
-  *)     ORIGIN="http://${FRONTEND_ID}.localhost:4943" ;;
+  ic)
+    ORIGIN="https://${FRONTEND_ID}.icp0.io"
+    IC_HOST="https://icp-api.io"
+    ;;
+  local|*)
+    ORIGIN="http://${FRONTEND_ID}.localhost:4943"
+    IC_HOST="http://127.0.0.1:4943"
+    ;;
 esac
 
-echo "[3/4] Deploying with CANISTER_ID_DFINSIGHT_BACKEND=$BACKEND_ID..."
+log "[4/6] Deploying both canisters (build + install + sync)"
+log "      CANISTER_ID_DFINSIGHT_BACKEND=$BACKEND_ID"
+log "      VITE_IC_HOST=$IC_HOST"
 CANISTER_ID_DFINSIGHT_BACKEND="$BACKEND_ID" \
+VITE_IC_HOST="$IC_HOST" \
   icp deploy -e "$ENV" "${PASSTHROUGH[@]}"
 
-echo "[4/4] Setting rpOrigin to $ORIGIN..."
+log "[5/6] Calling dfinsight_backend.setRpOrigin(\"$ORIGIN\")"
 icp canister call dfinsight_backend setRpOrigin "(\"$ORIGIN\")" \
   -e "$ENV" "${PASSTHROUGH[@]}"
 
-echo ""
-echo "Done."
-echo "  Frontend : $ORIGIN"
-echo "  Backend  : $BACKEND_ID"
+log "[6/6] Done."
+log "      Frontend : $ORIGIN"
+log "      Backend  : $BACKEND_ID"
