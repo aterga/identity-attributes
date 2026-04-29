@@ -76,17 +76,25 @@ class AttributeIdentity implements Identity {
     if (request.endpoint === Endpoint.ReadState) {
       return this.#inner.transformRequest(request);
     }
-    return this.#inner.transformRequest({
-      ...request,
-      body: {
-        ...request.body,
-        sender_info: {
-          signer: this.#signer.canisterId.toUint8Array(),
-          info: this.#attributes.data,
-          sig: this.#attributes.signature,
-        },
-      },
-    } as HttpAgentRequest);
+    // We MUTATE `request.body` instead of returning a fresh body object.
+    // Reason: `HttpAgent.call` keeps a reference to its original `submit`
+    // and computes `requestIdOf(submit)` *after* identity transformation
+    // for use as the polling lookup key. If we copy, the outer `submit`
+    // stays without `sender_info`, the polling request_id is the hash
+    // without `sender_info`, but the IC stores the result under the hash
+    // with `sender_info` — and the agent polls forever for a key that
+    // doesn't exist (infinite loading). Mutating in place keeps both
+    // hashes aligned.
+    //
+    // This is a workaround for an agent-js bug; the proper fix is to
+    // recompute `requestId` from `transformedRequest.body.content` after
+    // identity transformation. Filed as a follow-up to icp-js-core#1355.
+    (request.body as Record<string, unknown>).sender_info = {
+      signer: this.#signer.canisterId.toUint8Array(),
+      info: this.#attributes.data,
+      sig: this.#attributes.signature,
+    };
+    return this.#inner.transformRequest(request);
   }
 }
 
