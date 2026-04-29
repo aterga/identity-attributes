@@ -1,8 +1,82 @@
-import { Actor, AnonymousIdentity, HttpAgent, requestIdOf, type SignIdentity } from "@icp-sdk/core/agent";
+import {
+  Actor,
+  AnonymousIdentity,
+  HttpAgent,
+  requestIdOf,
+  type HttpAgentRequest,
+  type Identity,
+  type SignIdentity,
+} from "@icp-sdk/core/agent";
 import { AuthClient } from "@icp-sdk/auth/client";
 import { IDL } from "@icp-sdk/core/candid";
-import { AttributesIdentity, Ed25519KeyIdentity } from "@icp-sdk/core/identity";
+import { Ed25519KeyIdentity } from "@icp-sdk/core/identity";
 import { Principal } from "@icp-sdk/core/principal";
+
+interface SignedAttributes {
+  data: Uint8Array;
+  signature: Uint8Array;
+}
+
+/**
+ * Drop-in replacement for `@icp-sdk/core`'s `AttributesIdentity` that
+ * only injects `sender_info` on request types where the IC actually
+ * hashes it. Specifically:
+ *
+ *   - `/api/v4/.../call`        → hashes sender_info ✓ inject
+ *   - `/api/.../query`          → hashes sender_info ✓ inject
+ *   - `/api/v2/.../read_state`  → does NOT hash sender_info ✗ skip
+ *
+ * The upstream `AttributesIdentity` injects unconditionally, which
+ * makes agent-js sign hash(body+sender_info) for read_state polls
+ * while the IC verifies hash(body) — surfacing as
+ *   "Invalid basic signature: Ed25519 signature could not be verified"
+ * on the read_state poll *after* an otherwise-successful /call.
+ *
+ * See `representation_independent_hash_read_state` in the IC source
+ * (rs/types/types/src/messages/http.rs) — its hashed map omits
+ * sender_info, while `representation_independent_hash_call_or_query`
+ * includes it.
+ *
+ * TODO(upstream): file `dfinity/icp-js-core` issue / PR to gate the
+ * injection by request type in the canonical `AttributesIdentity`.
+ */
+class CallOnlyAttributesIdentity implements Identity {
+  readonly #inner: Identity;
+  readonly #attributes: SignedAttributes;
+  readonly #signer: { canisterId: Principal };
+
+  constructor(options: {
+    inner: Identity;
+    attributes: SignedAttributes;
+    signer: { canisterId: Principal };
+  }) {
+    this.#inner = options.inner;
+    this.#attributes = options.attributes;
+    this.#signer = options.signer;
+  }
+
+  getPrincipal(): Principal {
+    return this.#inner.getPrincipal();
+  }
+
+  transformRequest(request: HttpAgentRequest): Promise<unknown> {
+    const body = request.body as { request_type?: string } | undefined;
+    if (body?.request_type !== "call" && body?.request_type !== "query") {
+      return this.#inner.transformRequest(request);
+    }
+    return this.#inner.transformRequest({
+      ...request,
+      body: {
+        ...request.body,
+        sender_info: {
+          signer: this.#signer.canisterId.toUint8Array(),
+          info: this.#attributes.data,
+          sig: this.#attributes.signature,
+        },
+      },
+    } as HttpAgentRequest);
+  }
+}
 
 import {
   idlFactory,
@@ -658,15 +732,18 @@ async function signIn() {
   }
 
   // 4. Build two actors:
-  //    - `bagelForRegister`: AttributesIdentity wraps the inner
-  //      DelegationIdentity so `sender_info` rides on the ingress
-  //      message (only `register()` needs this).
+  //    - `bagelForRegister`: `CallOnlyAttributesIdentity` wraps the
+  //      inner DelegationIdentity so `sender_info` rides on the
+  //      `/call` ingress message — but NOT on the `/read_state` polls
+  //      that follow (the IC's read_state hash doesn't include
+  //      sender_info, so injecting it there breaks signature
+  //      verification).
   //    - `bagel`: plain DelegationIdentity, no sender_info — used for
   //      every other call (`join_round`, `my_match`, `reset`).
-  //    The signer canister ID inside AttributesIdentity has to match
-  //    the canister that *issued* the delegation in `sender_pubkey` —
-  //    beta II for `beta.id.ai`, prod II for `id.ai`.
-  const attrIdentity = new AttributesIdentity({
+  //    The signer canister ID has to match the canister that *issued*
+  //    the delegation in `sender_pubkey` — beta II for `beta.id.ai`,
+  //    prod II for `id.ai`.
+  const attrIdentity = new CallOnlyAttributesIdentity({
     inner,
     attributes: signedAttrs,
     signer: {
