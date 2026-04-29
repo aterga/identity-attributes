@@ -49,6 +49,12 @@
         border-radius: 4px;
         font-size: 0.85rem;
       }
+      /* Without this, `.controls`'s `display: flex` overrides the
+         user-agent `[hidden] { display: none }` and the developer-only
+         II-instance selector leaks into non-debug mode. */
+      .controls[hidden] {
+        display: none;
+      }
       .controls label { color: #555; }
       .controls code {
         background: #eef;
