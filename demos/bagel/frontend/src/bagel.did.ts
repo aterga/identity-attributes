@@ -14,10 +14,16 @@ export type JoinOutcome =
   | { Waiting: null }
   | { Paired: { email: string } };
 
-export type JoinError =
+export type RegisterError =
   | { Verify: VerifyError }
   | { NoEmail: null }
   | { WrongDomain: { email: string } };
+
+export type JoinError = { NotRegistered: null };
+
+export type RegisterResult =
+  | { ok: { email: string } }
+  | { err: RegisterError };
 
 export type JoinResult =
   | { ok: JoinOutcome }
@@ -25,6 +31,7 @@ export type JoinResult =
 
 export interface Bagel {
   generate_nonce: () => Promise<Uint8Array>;
+  register: () => Promise<RegisterResult>;
   join_round: () => Promise<JoinResult>;
   my_match: () => Promise<[] | [string]>;
   reset: () => Promise<void>;
@@ -49,16 +56,22 @@ export const idlFactory = ({ IDL }: { IDL: any }) => {
     Waiting: IDL.Null,
     Paired: IDL.Record({ email: IDL.Text }),
   });
-  const JoinError = IDL.Variant({
+  const RegisterError = IDL.Variant({
     Verify: Error_,
     NoEmail: IDL.Null,
     WrongDomain: IDL.Record({ email: IDL.Text }),
   });
-  const Result = IDL.Variant({ ok: JoinOutcome, err: JoinError });
+  const JoinError = IDL.Variant({ NotRegistered: IDL.Null });
+  const RegisterResult = IDL.Variant({
+    ok: IDL.Record({ email: IDL.Text }),
+    err: RegisterError,
+  });
+  const JoinResult = IDL.Variant({ ok: JoinOutcome, err: JoinError });
 
   return IDL.Service({
     generate_nonce: IDL.Func([], [IDL.Vec(IDL.Nat8)], []),
-    join_round: IDL.Func([], [Result], []),
+    register: IDL.Func([], [RegisterResult], []),
+    join_round: IDL.Func([], [JoinResult], []),
     my_match: IDL.Func([], [IDL.Opt(IDL.Text)], ["query"]),
     reset: IDL.Func([], [], []),
     pool_size: IDL.Func([], [IDL.Nat], ["query"]),

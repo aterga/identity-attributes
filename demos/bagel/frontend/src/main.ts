@@ -4,7 +4,12 @@ import { IDL } from "@icp-sdk/core/candid";
 import { AttributesIdentity, Ed25519KeyIdentity } from "@icp-sdk/core/identity";
 import { Principal } from "@icp-sdk/core/principal";
 
-import { idlFactory, type Bagel, type JoinResult } from "./bagel.did";
+import {
+  idlFactory,
+  type Bagel,
+  type JoinResult,
+  type RegisterResult,
+} from "./bagel.did";
 
 // ICRC-3 `Value` recursive variant (matches the canonical type used by
 // II's attribute bundles). The `info` blob inside `SignedAttributes` is
@@ -398,13 +403,21 @@ let authClient: AuthClient | null = null;
 // what produced the "Invalid basic signature: EcdsaP256" ingress error.
 let sessionIdentity: SignIdentity | null = null;
 let pendingNonce: Promise<Uint8Array> | null = null;
+// Regular Bagel actor — backed by the plain DelegationIdentity (no
+// AttributesIdentity wrap, so no sender_info on the wire). Used for
+// every method *except* `register()`, which is the one and only call
+// that needs the bundle attached.
 let bagel: Bagel | null = null;
-// DEBUG-only: a Bagel actor whose agent uses *just* the inner DelegationIdentity,
-// with no AttributesIdentity wrapping. Used to isolate whether the EcdsaP256
-// signature error is caused by sender_info pollution.
-let bareBagel: Bagel | null = null;
+// AttributesIdentity-wrapped actor — used exclusively for `register()`.
+// Once the canister has remembered the caller as a known DFINITY
+// employee, no further calls need the bundle.
+let bagelForRegister: Bagel | null = null;
 
-function setSignedIn(principalText: string, verify: VerifyResult | null) {
+function setSignedIn(
+  principalText: string,
+  verify: VerifyResult | null,
+  register: RegisterResult | { thrown: string } | null,
+) {
   $status.textContent = "signed in";
   $principal.textContent = principalText.slice(0, 5) + "…" + principalText.slice(-5);
   $principal.hidden = false;
@@ -419,21 +432,28 @@ function setSignedIn(principalText: string, verify: VerifyResult | null) {
     $email.hidden = false;
   }
 
-  // Treat a decode failure (verify === null) the same as a failed
-  // verification: block the buttons, show a generic error.
-  const allChecksPass = verify?.ok === true;
+  // Decide who's the gating authority:
+  //   - register.ok  → cleared, enable Join
+  //   - register.err → canister rejected, block (show their error)
+  //   - register === null AND verify failed → never even attempted the
+  //     canister call; show the local failure list
+  //   - register thrown → IC ingress error (the EcdsaP256/Ed25519 bug);
+  //     show that
+  const registered = register !== null && "ok" in register;
+  const registerRejected = register !== null && "err" in register;
+  const registerThrown = register !== null && "thrown" in register;
   const emailFailedDomain =
     verify !== null &&
-    !allChecksPass &&
+    !verify.ok &&
     verify.checks.some(
       (c) => c.name === `email domain @${ALLOWED_DOMAIN}` && !c.ok,
     );
 
-  if (allChecksPass) {
+  if (registered) {
     $gate.className = "gate gate-ok";
     $gate.innerHTML =
-      `Welcome, <code>${escapeHtml(verify!.email!)}</code> — bundle ` +
-      `verified locally (${verify!.checks.length}/${verify!.checks.length} checks).`;
+      `Welcome, <code>${escapeHtml((register as { ok: { email: string } }).ok.email)}</code> ` +
+      `— canister verified the bundle, you're cleared for coffee.`;
     $gate.hidden = false;
     $join.disabled = false;
     $match.disabled = false;
@@ -441,14 +461,17 @@ function setSignedIn(principalText: string, verify: VerifyResult | null) {
     return;
   }
 
-  // Failed verification: keep the buttons off (in non-DEBUG mode) so the
-  // user can't trigger the doomed canister call.
+  // Anything else: block the buttons (unless DEBUG) and explain why.
   $gate.className = "gate gate-block";
-  const failedItems = (verify?.checks ?? [])
-    .filter((c) => !c.ok)
-    .map((c) => `<li><code>${escapeHtml(c.name)}</code>${c.detail ? ` — ${escapeHtml(c.detail)}` : ""}</li>`)
-    .join("");
-  if (emailFailedDomain && verify?.email) {
+  if (registerRejected) {
+    const err = (register as { err: unknown }).err;
+    $gate.innerHTML =
+      `Canister rejected the bundle: <code>${escapeHtml(JSON.stringify(err))}</code>.`;
+  } else if (registerThrown) {
+    $gate.innerHTML =
+      `Canister round-trip failed (IC ingress refused the call): ` +
+      `<code>${escapeHtml((register as { thrown: string }).thrown)}</code>.`;
+  } else if (emailFailedDomain && verify?.email) {
     $gate.innerHTML =
       `Sorry, <code>${escapeHtml(verify.email)}</code> isn't on the guest list — ` +
       `Bagel is only open to members of the DFINITY Foundation. ` +
@@ -459,6 +482,10 @@ function setSignedIn(principalText: string, verify: VerifyResult | null) {
       `Couldn't decode the attribute bundle returned by Internet Identity. ` +
       `See the log for details.`;
   } else {
+    const failedItems = verify.checks
+      .filter((c) => !c.ok)
+      .map((c) => `<li><code>${escapeHtml(c.name)}</code>${c.detail ? ` — ${escapeHtml(c.detail)}` : ""}</li>`)
+      .join("");
     $gate.innerHTML =
       `Local verification failed — the canister would reject this bundle:` +
       `<ul style="margin: 0.5rem 0 0 1.25rem; padding: 0;">${failedItems}</ul>`;
@@ -617,37 +644,56 @@ async function signIn() {
     log("  [debug] (ingress_expiry pinned to 0n for reproducibility)");
   }
 
-  // 4. Wrap the DelegationIdentity returned by signIn with
-  //    AttributesIdentity — this injects `sender_info` on every outgoing
-  //    canister call, so the bagel canister's `II.verify<system>` sees
-  //    the signed bundle. The signer canister ID has to match the
-  //    canister that *issued* the delegation in `sender_pubkey` —
+  // 4. Build two actors:
+  //    - `bagelForRegister`: AttributesIdentity wraps the inner
+  //      DelegationIdentity so `sender_info` rides on the ingress
+  //      message (only `register()` needs this).
+  //    - `bagel`: plain DelegationIdentity, no sender_info — used for
+  //      every other call (`join_round`, `my_match`, `reset`).
+  //    The signer canister ID inside AttributesIdentity has to match
+  //    the canister that *issued* the delegation in `sender_pubkey` —
   //    beta II for `beta.id.ai`, prod II for `id.ai`.
-  const identity = new AttributesIdentity({
+  const attrIdentity = new AttributesIdentity({
     inner,
     attributes: signedAttrs,
     signer: {
       canisterId: Principal.fromText(iiCanisterIdFor(iiInstance)),
     },
   });
-
-  const agent = await makeAgent(identity);
-  bagel = makeActor(agent);
-
-  if (DEBUG) {
-    // Same delegation, same session key, same agent host — but NO
-    // AttributesIdentity wrap, so no sender_info on the wire. If
-    // join_round() reaches the canister with this and only fails inside
-    // with `#NoAttributes`, the IC ingress signature path is fine and
-    // the basic-signature error is sender_info-induced.
-    const bareAgent = await makeAgent(inner);
-    bareBagel = makeActor(bareAgent);
-    log("  [debug] bareBagel actor ready (DelegationIdentity only, no AttributesIdentity)");
-  }
+  bagelForRegister = makeActor(await makeAgent(attrIdentity));
+  bagel            = makeActor(await makeAgent(inner));
 
   const p = inner.getPrincipal().toText();
-  setSignedIn(p, verifyResult);
   log("  signed in as", p);
+
+  // 5. Skip the canister round-trip if local checks already failed —
+  //    the canister would just re-discover the same problem. Surface
+  //    the local verdict in the gate banner.
+  if (verifyResult === null || !verifyResult.ok) {
+    setSignedIn(p, verifyResult, null);
+    return;
+  }
+
+  // 6. Authoritative server-side verification. Sends the bundle to the
+  //    canister via `register()`, which runs `II.verify<system>` and,
+  //    on success, remembers the caller's principal as a known DFINITY
+  //    employee. From then on, `join_round()` etc. just look the caller
+  //    up — no bundle needed on subsequent calls.
+  log("→ bagel.register() — canister verifies the bundle and remembers caller");
+  let registerOutcome: RegisterResult | { thrown: string } | null = null;
+  try {
+    registerOutcome = await bagelForRegister.register();
+    if ("ok" in registerOutcome) {
+      log("  ✓ canister verified — registered as", registerOutcome.ok.email);
+    } else {
+      log("  ✗ canister rejected:", JSON.stringify(registerOutcome.err));
+    }
+  } catch (e) {
+    registerOutcome = { thrown: String(e) };
+    log("  ✗ register() failed:", String(e));
+  }
+
+  setSignedIn(p, verifyResult, registerOutcome);
 }
 
 // --------------------------------------------------------- canister calls --
@@ -656,28 +702,11 @@ function formatJoin(r: JoinResult): string {
     if ("Waiting" in r.ok) return "waiting for a partner";
     return `paired with ${r.ok.Paired.email}`;
   }
-  if ("Verify" in r.err) return `verify failed: ${Object.keys(r.err.Verify)[0]}`;
-  if ("NoEmail" in r.err) return "no email in bundle";
-  return `wrong domain: ${r.err.WrongDomain.email}`;
+  return "not registered (call register() first via re-sign-in)";
 }
 
 async function join() {
   if (!bagel) return;
-
-  if (DEBUG && bareBagel) {
-    log("→ [debug] calling join_round() with bare DelegationIdentity (no sender_info)");
-    try {
-      const res = await bareBagel.join_round();
-      // Expected when the IC accepts the call but the canister sees no
-      // attributes: `Err({Verify: NoAttributes})`. That confirms the IC
-      // ingress signature path works fine without sender_info, isolating
-      // the EcdsaP256 failure to the AttributesIdentity wrapping.
-      log("  [debug] bare result:", formatJoin(res));
-      log("  [debug] bare raw:", res);
-    } catch (e) {
-      log("  [debug] bare ERROR:", String(e));
-    }
-  }
 
   log("→ calling join_round()");
   try {
@@ -768,8 +797,11 @@ log("");
 log("1. Sign in with II — single popup delivers a delegation + a signed");
 log("   email attribute bundle (icrc34_delegation + ii-icrc3-attributes,");
 log("   fired in parallel via Promise.all on the same AuthClient — both");
-log("   share one PostMessageTransport channel).");
-log("2. Join round — the wrapped AttributesIdentity attaches the bundle");
-log("   as sender_info; the canister verifies origin + nonce + freshness,");
-log("   then pairs you with another @dfinity.org human.");
+log("   share one PostMessageTransport channel). Right after, we call");
+log("   bagel.register() with sender_info attached so the canister can");
+log("   verify the bundle and remember this principal as a known");
+log("   DFINITY employee.");
+log("2. Join round — plain DelegationIdentity (no sender_info on the");
+log("   wire). The canister just looks the caller up in `registered`");
+log("   and pairs them with another waiting @dfinity.org human.");
 log("3. My match — polls for the partner's email.");
