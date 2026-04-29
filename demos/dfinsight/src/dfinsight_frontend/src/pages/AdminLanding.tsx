@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { signInAdmin, makePublicBackend, AdminSignInError } from "../lib/auth";
+import {
+  signInAdmin,
+  preflightAdminSignIn,
+  makePublicBackend,
+  AdminSignInError,
+} from "../lib/auth";
+import type { AdminSignInPreflight } from "../lib/auth";
 import { sessionStore } from "../lib/sessionStore";
 import type { AdminError } from "../lib/declarations/dfinsight_backend.types";
 
@@ -29,6 +35,18 @@ export function AdminLanding() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [admins, setAdmins] = useState<string[]>([]);
+  const [preflight, setPreflight] = useState<AdminSignInPreflight | null>(null);
+
+  // Pre-fetch the canister-issued nonce so the click handler can open
+  // the signer popup synchronously. signer-js rejects popup opens that
+  // aren't a direct response to a click — any awaits between the click
+  // and `client.signIn()` burn the user-activation flag.
+  const refreshPreflight = useCallback(() => {
+    setPreflight(null);
+    void preflightAdminSignIn()
+      .then(setPreflight)
+      .catch((e) => setError(String(e)));
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -40,13 +58,15 @@ export function AdminLanding() {
         // sign-in flow surface the real error.
       }
     })();
-  }, []);
+    refreshPreflight();
+  }, [refreshPreflight]);
 
   const onSignIn = async () => {
+    if (!preflight) return;
     setError(null);
     setBusy(true);
     try {
-      const s = await signInAdmin();
+      const s = await signInAdmin(preflight);
       sessionStore.set(s);
       navigate("/admin/panel");
     } catch (e) {
@@ -55,6 +75,8 @@ export function AdminLanding() {
       } else {
         setError(String(e));
       }
+      // Nonce was burned (or expired) — fetch a fresh one for retry.
+      refreshPreflight();
     } finally {
       setBusy(false);
     }
@@ -68,8 +90,16 @@ export function AdminLanding() {
         spam, and post a public response (which closes voting on that issue).
         Admins cannot post or upvote — that only happens from the user page.
       </p>
-      <button onClick={onSignIn} disabled={busy} className="primary">
-        {busy ? "Signing in…" : "Sign in as Dfinsight admin"}
+      <button
+        onClick={onSignIn}
+        disabled={busy || !preflight}
+        className="primary"
+      >
+        {busy
+          ? "Signing in…"
+          : !preflight
+            ? "Preparing…"
+            : "Sign in as Dfinsight admin"}
       </button>
 
       <details className="admins">
