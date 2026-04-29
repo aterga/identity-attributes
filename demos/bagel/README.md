@@ -14,18 +14,37 @@ bundle.
   Frontend (RP)              Bagel canister             II frontend / backend
   ─────────────              ──────────────             ─────────────────────
 
-  call generate_nonce() ───────────►
+  on page load:
+    call generate_nonce() ─────────►
                                   │
-                                  ├── Challenges.issue<system>(caller, 5 min)
+                                  ├── Challenges.issue<system>(
+                                  │     anon, 5 min
+                                  │   )
                                   │
-  ◄─────────────────── 32-byte nonce
+    ◄─────────────── 32-byte nonce
+    (pre-fetched, sits in memory)
 
-  requestAttributes({
-    keys:  ["email"],
-    nonce
-  }) ─────────────────────────────────────────────────► II consent + sign
-
-  ◄─────────────────────────────── SignedAttributes { data, signature }
+  --- user clicks "Sign in with II" ---
+  Promise.all([
+    authClient.signIn({                             ─► icrc34_delegation
+      maxTimeToLive,                                   (delegation consent)
+    }),
+    pendingNonce.then(n =>                          ─► ii-icrc3-attributes
+      authClient.requestAttributes({                   (attribute consent
+        keys: ["sso:dfinity.org:email"],                on the same popup)
+        nonce: n,
+      })),
+  ])
+    // signIn opens the popup synchronously inside
+    // the click gesture; requestAttributes piggy-
+    // backs on the same channel as soon as the
+    // pre-fetched nonce resolves. Both responses
+    // come back over one PostMessageTransport
+    // session.
+  ◄──── DelegationChain  +  SignedAttributes { data, signature }
+                                                       (popup auto-closes
+                                                        200ms after the
+                                                        last response)
 
   wrap in AttributesIdentity
   call join_round() ───────────►
@@ -35,6 +54,7 @@ bundle.
                                   │       expectedOrigin = "https://bagel.example.com";
                                   │       maxAgeNs       = 5 min;
                                   │     };
+                                  │     caller = anon,   // nonce lookup key
                                   │     nonces = ?nonces;
                                   │   })
                                   ├── II.getText(attrs, "email")
@@ -47,15 +67,23 @@ bundle.
   ◄─────────────────── ?Text
 ```
 
+> **Why the nonce is stored under `Principal.anonymous()`.** The frontend
+> fetches the nonce on page load — before the user signs in — with an
+> anonymous agent. `Challenges.Store` is keyed by `Principal`, so if we
+> keyed on the caller we'd issue under `anonymous` and consume under
+> the authenticated user, losing the nonce. Keying globally is safe:
+> replay is still prevented because the nonce is single-use and the
+> II signature binds the nonce to the delegated user.
+
 ## Public API
 
-| Method            | Type     | Description                                              |
-|-------------------|----------|----------------------------------------------------------|
-| `generate_nonce`  | update   | Issues a 32-byte nonce for the caller (TTL: 5 min).      |
+| Method            | Type     | Description                                                |
+|-------------------|----------|------------------------------------------------------------|
+| `generate_nonce`  | update   | Issues a 32-byte nonce (TTL: 5 min, canister-global).      |
 | `join_round`      | update   | Verifies attributes, checks the email domain, pairs/waits. |
-| `my_match`        | query    | Returns the email of the caller's match, if any.         |
-| `reset`           | update   | Leaves the pool and drops any existing pairing.          |
-| `pool_size`       | query    | Number of callers currently waiting for a partner.       |
+| `my_match`        | query    | Returns the email of the caller's match, if any.           |
+| `reset`           | update   | Leaves the pool and drops any existing pairing.            |
+| `pool_size`       | query    | Number of callers currently waiting for a partner.         |
 
 ## Security tier
 
@@ -81,9 +109,50 @@ npm install
 npm run dev    # Vite serves on http://localhost:5173
 ```
 
-It exposes three buttons — **Sign in with II**, **Join round**,
-**My match** — and logs every step (nonce, decoded attributes, canister
-response) to the page so you can watch the protocol execute.
+It exposes:
+
+- An **II-instance toggle** at the top (production `id.ai` vs beta
+  `beta.id.ai`) — the choice is stored in `localStorage` and the page
+  reloads when it changes, so the pre-built `AuthClient` always talks
+  to the instance you selected.
+- Three buttons — **Sign in with II**, **Join round**, **My match** —
+  plus a **Reset** escape hatch.
+- A live log that shows every step (pre-fetched nonce, decoded
+  attributes, canister response) so you can watch the protocol execute.
+
+On page load the frontend pre-builds the `AuthClient` (from
+[`@icp-sdk/auth`](https://js.icp.build/auth/)) and kicks off a
+`generate_nonce()` fetch, so the click handler can call
+`authClient.signIn(...)` with zero blocking awaits in front of it —
+otherwise the browser treats the eventual `window.open` as
+programmatically-initiated and blocks the popup.
+
+`signIn` and `requestAttributes` are fired in parallel on the same
+`AuthClient` (and therefore the same underlying `Signer`):
+
+```ts
+const signInPromise = authClient.signIn({ maxTimeToLive });
+const attrsPromise  = pendingNonce.then(nonce =>
+  authClient.requestAttributes({
+    keys: ["sso:dfinity.org:email"], nonce,
+  }),
+);
+const [inner, attrs] = await Promise.all([signInPromise, attrsPromise]);
+```
+
+`signIn` opens the popup synchronously inside the click gesture (the
+`window.open` happens before its first `await`), and the parallel
+`requestAttributes` posts its `ii-icrc3-attributes` request on the
+same channel as soon as the pre-fetched nonce resolves. II processes
+the two consent screens in one popup session; both responses come
+back over the same channel and `Promise.all` resolves once both
+land. The Signer's auto-close fires 200 ms after the last response
+and the popup closes on its own.
+
+This used to fail on `@icp-sdk/auth@6.2.0` because `requestAttributes`
+was emitting its JSON-RPC request without an `id`, so the response
+listener couldn't match the response and the auto-close timer killed
+the channel. Fixed in **6.2.1** — this demo pins that version.
 
 ## What's deliberately missing
 
@@ -105,38 +174,33 @@ and an agent-js build that attaches `sender_info` to ingress messages).
 Without the last piece, `generate_nonce` works but `join_round` rejects
 with `#Verify(#NoAttributes)`.
 
+This demo uses [icp-cli](https://cli.internetcomputer.org) (the new
+unified CLI that replaces `dfx`). Install it with:
+
+```bash
+npm install -g @icp-sdk/icp-cli @icp-sdk/ic-wasm
+```
+
+Then:
+
 ```bash
 cd demos/bagel
 mops install
-dfx start --clean --background
-dfx deploy bagel
-
-# Point the canister at your locally-deployed II (see ../../../internet-identity
-# for how to spin one up), then set the trusted signer:
-dfx canister call aaaaa-aa update_settings "(record {
-  canister_id = principal \"$(dfx canister id bagel)\";
-  settings = record {
-    environment_variables = opt vec {
-      record {
-        name  = \"trusted_attribute_signers\";
-        value = \"rdmx6-jaaaa-aaaaa-aaadq-cai\";
-      }
-    };
-  };
-})"
+icp network start                # replaces `dfx start --clean --background`
+icp deploy bagel                 # replaces `dfx deploy bagel`
 
 cd frontend
 cp .env.example .env.local
-# edit .env.local — set VITE_BAGEL_CANISTER_ID to the id dfx just printed
+# edit .env.local — set VITE_BAGEL_CANISTER_ID to the id icp just printed
+# (or run `icp canister status bagel --id-only` from demos/bagel/)
 npm install && npm run dev
 ```
 
-## Deploying to mainnet
+The trusted-signer env var is declared once in [`icp.yaml`](icp.yaml)
+under `canisters[bagel].settings.environment_variables.trusted_attribute_signers`,
+so `icp deploy` sets it for you — no separate management-canister call.
 
-Everything here works today *except* the final ingress-attachment step —
-`join_round` will reject with `#Verify(#NoAttributes)` until agent-js
-ships a `sender_info` hook. All the deployment plumbing is in place so
-that once it does, only the frontend needs a bump.
+## Deploying to mainnet
 
 1. **Pick the frontend origin.** Edit [`src/Main.mo:23`](src/Main.mo:23)
    (`rpOrigin`) to whatever your deployed frontend will serve from —
@@ -144,52 +208,63 @@ that once it does, only the frontend needs a bump.
    This is checked against `implicit:origin` and has to match exactly.
 
 2. **Create the canisters** (you'll need a cycles wallet — see
-   [the dfx cycles docs](https://internetcomputer.org/docs/building-apps/getting-started/tokens-and-cycles)):
+   [the icp-cli tokens/cycles docs](https://internetcomputer.org/docs/building-apps/getting-started/tokens-and-cycles)).
+   If you've already got the canisters created (e.g. ported from a
+   dfx deployment), pin their IDs in
+   [`.icp/data/mappings/ic.ids.json`](.icp/data/mappings/ic.ids.json)
+   — this repo already does that:
 
-   ```bash
-   dfx canister create --network ic --all
+   ```json
+   {
+     "bagel": "umeux-raaaa-aaaad-agnyq-cai",
+     "bagel_frontend": "ufh7l-hiaaa-aaaad-agnza-cai"
+   }
    ```
 
-3. **Set the trusted signer env var on the bagel canister.** The IC
-   management canister accepts `environment_variables` in its settings;
-   dfx's `update-settings` subcommand doesn't expose that yet, so call
-   the management canister directly:
+   For a fresh deploy, let `icp deploy -e ic` create them and then copy
+   the printed IDs into that file (so the next `deploy` upgrades in
+   place instead of re-creating).
 
-   ```bash
-   BAGEL=$(dfx canister --network ic id bagel)
-   dfx canister --network ic call aaaaa-aa update_settings "(record {
-     canister_id = principal \"$BAGEL\";
-     settings = record {
-       environment_variables = opt vec {
-         record {
-           name  = \"trusted_attribute_signers\";
-           value = \"rdmx6-jaaaa-aaaaa-aaadq-cai\";
-         }
-       };
-     };
-   })"
-   ```
+3. **Trusted signers env var** is already declared in
+   [`icp.yaml`](icp.yaml); `icp deploy -e ic` applies it during
+   canister settings update. The list is comma-separated and contains
+   both `rdmx6-…-aaadq-cai` (Internet Identity production) and
+   `fgte5-ciaaa-aaaad-aaatq-cai` (Internet Identity beta), matching
+   the frontend's II-instance toggle. `mo:core/CallerAttributes` will
+   only return attribute data when `sender_info.signer` is one of
+   these.
 
-   `rdmx6-…-aaadq-cai` is the Internet Identity production canister —
-   the only signer `mo:core/CallerAttributes` will trust.
+   The IC also enforces that `sender_info.signer` matches the canister
+   that *issued* the delegation in `sender_pubkey` — so the frontend
+   has to pass the right canister ID into `AttributesIdentity`
+   depending on which II it signed in against (handled automatically
+   by the `iiCanisterIdFor(instance)` helper in
+   [`frontend/src/main.ts`](frontend/src/main.ts)).
 
 4. **Build the frontend against mainnet.** Create
-   `frontend/.env.production` from `.env.example`, setting:
+   `frontend/.env.production` from `.env.example`, setting at minimum:
 
    ```
-   VITE_BAGEL_CANISTER_ID=<what `dfx canister --network ic id bagel` printed>
+   VITE_BAGEL_CANISTER_ID=<what `icp canister status bagel -e ic --id-only` printed>
    VITE_IC_HOST=https://icp0.io
-   VITE_II_URL=https://id.ai
    ```
 
-5. **Deploy.** `dfx deploy --network ic` builds both canisters and
-   uploads the frontend assets.
+   `VITE_II_URL_PROD` / `VITE_II_URL_BETA` are optional — when unset
+   the frontend's II-instance toggle picks `https://id.ai` or
+   `https://beta.id.ai` automatically.
+
+5. **Deploy.** `icp deploy -e ic` builds both canisters and uploads
+   the frontend assets.
 
 6. **Smoke test.** Visit `https://<bagel_frontend-id>.icp0.io`.
-   Sign-in opens II once and returns both a delegation and a signed
-   `sso:dfinity.org:email` bundle. `join_round` rides on an
-   `AttributesIdentity` wrapper (from `@icp-sdk/core/identity`), which
-   attaches the signed bundle as `sender_info` on the outgoing ingress
-   call; the canister then verifies origin + nonce + freshness and
-   pairs you with another `@dfinity.org` human (or puts you on the
-   pool). Open the page in two browsers to see the pairing.
+   Use the **II instance** dropdown at the top to pick production
+   (`id.ai`, default) or beta (`beta.id.ai`) — the page reloads so the
+   pre-built `AuthClient` talks to the right endpoint. Sign-in opens
+   II once and returns both a delegation and a signed
+   `sso:dfinity.org:email` bundle on the same popup channel.
+   `join_round` rides on an `AttributesIdentity` wrapper (from
+   `@icp-sdk/core/identity`), which attaches the signed bundle as
+   `sender_info` on the outgoing ingress call; the canister then
+   verifies origin + nonce + freshness and pairs you with another
+   `@dfinity.org` human (or puts you on the pool). Open the page in
+   two browsers to see the pairing.
