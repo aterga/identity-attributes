@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@icp-sdk/auth": "^6.2.2",
-    "@icp-sdk/core": "^5.3.1",
+    "@icp-sdk/core": "^5.4.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.6.3"
