@@ -62,6 +62,15 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // -------------------------------------------------------------- state --
 
+  // Canister-global nonce store, keyed by `anonNonceKey` rather than
+  // the actual caller. The frontend pre-fetches a nonce on page mount
+  // (anonymously, before the admin SSO popup) and the canister later
+  // verifies the bundle under a different principal (the SSO
+  // identity). Storing under a fixed key — and looking up under the
+  // same fixed key — makes issue/verify caller-agnostic. Nonces are
+  // 32-byte random blobs, so sharing the slot is safe: another caller
+  // can't replay yours unless their bundle's signature also covers it.
+  let anonNonceKey = Principal.anonymous();
   let nonces = Challenges.empty();
 
   var nextIssueId : Nat = 0;
@@ -158,12 +167,14 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // -------------------------------------------------------- user API --
 
-  /// 32-byte canister-issued nonce, scoped to `caller`. Required for the
-  /// admin flow's Authorization-tier verify, but harmless (and free) for
-  /// the user flow — we expose the same entry point so the frontend
-  /// doesn't have to branch on "am I about to ask for attributes?".
-  public shared ({ caller }) func generate_nonce() : async Blob {
-    await Challenges.issue<system>(nonces, caller, nonceTtlNs);
+  /// 32-byte canister-issued nonce. Required for the admin flow's
+  /// Authorization-tier verify; the user flow doesn't need it, but the
+  /// frontend pre-fetches one on every admin-page load (anonymously,
+  /// before the SSO popup) so the click handler stays synchronous.
+  /// Issued under `anonNonceKey` so verify can look it up under the
+  /// same key regardless of who's calling.
+  public shared func generate_nonce() : async Blob {
+    await Challenges.issue<system>(nonces, anonNonceKey, nonceTtlNs);
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
@@ -291,7 +302,12 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // Full Authorization-tier verify against `mo:identity-attributes`.
   // Called only by `establishAdminSession`. Returns the verified name
   // on success.
-  func verifyAdminAttributes<system>(caller : Principal) : Result.Result<Text, AdminError> {
+  func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
+    // The `caller` field in `II.verify` is *only* used to look up the
+    // nonce; the actual signing principal is determined from the IC's
+    // `sender_info`. We pass `anonNonceKey` to match how
+    // `generate_nonce` issued it. `establishAdminSession` is the one
+    // that binds the real SSO caller to `adminSessions`.
     let attrs = switch (II.verify<system>({
       policy = #Authorization {
         // II attests the legacy `.ic0.app` form even when the user
@@ -299,7 +315,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
         expectedOrigin = Origin.remapToLegacyDomain(rpOrigin);
         maxAgeNs       = maxAttrAgeNs;
       };
-      caller;
+      caller = anonNonceKey;
       nonces = ?nonces;
     })) {
       case (#err e) return #err(#Verify e);
@@ -339,7 +355,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   /// rest of the admin actions in this session are just a Map lookup.
   /// The frontend calls this immediately after `signInAdmin`.
   public shared ({ caller }) func establishAdminSession() : async Result.Result<{ name : Text; expiresAt : Int }, AdminError> {
-    switch (verifyAdminAttributes<system>(caller)) {
+    switch (verifyAdminAttributes<system>()) {
       case (#err e) #err e;
       case (#ok name) {
         let expiresAt = Time.now() + adminSessionNs;
