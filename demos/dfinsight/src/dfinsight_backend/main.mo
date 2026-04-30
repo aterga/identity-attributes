@@ -77,17 +77,17 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // For the rolling-24h limit.
   let lastPostAt = Map.empty<Principal, Int>();
 
-  // Set from the actor-class init arg on first install. Stable, so it
-  // survives upgrades (init args are re-evaluated on upgrade but the
-  // pre-existing value of a stable `let` is preserved). Edit
-  // `icp.yaml`'s `init_args` for the bootstrap list; on a running
-  // canister, use `--mode reinstall` (state-wiping) or add a setter.
+  // Seeded from the actor-class init arg on first install. Stable
+  // across upgrades (init args are re-evaluated on upgrade but the
+  // pre-existing value of a stable `var` is preserved). After install,
+  // mutate via `addAdmin` / `removeAdmin` — both gated on a live admin
+  // session, so any current admin can grow or shrink the list.
   //
   // The admin list is public — anyone (signed in or not) can read it
   // via `listAdmins()`, so non-admin DFINITY members who hit the admin
   // page see who *is* allowed. Names must match the verified
   // `sso:dfinity.org:name` value exactly.
-  let admins : [Text] = initialAdmins;
+  var admins : [Text] = initialAdmins;
 
   // Cache of `principal -> (verifiedName, expiresAt)` populated by
   // `establishAdminSession`. Subsequent admin actions just look up this
@@ -140,6 +140,14 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
     // session — the frontend should call `establishAdminSession` (which
     // does the full SSO + attribute verify) and then retry.
     #SessionExpired;
+    // Admin management:
+    //   #AlreadyAdmin — addAdmin called with a name already on the list
+    //   #UnknownAdmin — removeAdmin called with a name not on the list
+    //   #LastAdmin    — removeAdmin would empty the list; refused to
+    //                   prevent locking the canister out of admin ops
+    #AlreadyAdmin;
+    #UnknownAdmin;
+    #LastAdmin;
   };
 
   // -------------------------------------------------------- user API --
@@ -372,6 +380,34 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
     let ?issue = Map.get(issues, Nat.compare, id) else return #err(#NotFound);
     Map.add(issues, Nat.compare, id, { issue with response = ?trimmed });
+    #ok()
+  };
+
+  /// Add a name to the admin allowlist. Any current admin can do this.
+  /// Names must match the verified `sso:dfinity.org:name` exactly — the
+  /// canister can't reach out to id.ai to validate, so a typo here just
+  /// means the corresponding sign-in will return `#NotAdmin` later.
+  public shared ({ caller }) func addAdmin(name : Text) : async Result.Result<(), AdminError> {
+    switch (requireAdminSession(caller)) { case (#err e) return #err e; case _ {} };
+    let trimmed = Text.trim(name, #char ' ');
+    if (Text.size(trimmed) == 0) return #err(#Empty);
+    if (isAdmin(trimmed)) return #err(#AlreadyAdmin);
+    admins := Array.concat(admins, [trimmed]);
+    #ok()
+  };
+
+  /// Remove a name from the admin allowlist. Refused if it would empty
+  /// the list (no `setAdmins` rescue path; reinstalling wipes state).
+  /// The caller can remove themselves — they keep their existing admin
+  /// session until it expires, but `establishAdminSession` will reject
+  /// any future sign-in.
+  public shared ({ caller }) func removeAdmin(name : Text) : async Result.Result<(), AdminError> {
+    switch (requireAdminSession(caller)) { case (#err e) return #err e; case _ {} };
+    let trimmed = Text.trim(name, #char ' ');
+    if (Text.size(trimmed) == 0) return #err(#Empty);
+    if (not isAdmin(trimmed)) return #err(#UnknownAdmin);
+    if (admins.size() <= 1) return #err(#LastAdmin);
+    admins := Array.filter<Text>(admins, func(a) = a != trimmed);
     #ok()
   };
 

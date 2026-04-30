@@ -67,9 +67,13 @@ esac
 log "[4/6] Deploying both canisters (build + install + sync)"
 log "      CANISTER_ID_DFINSIGHT_BACKEND=$BACKEND_ID"
 log "      VITE_IC_HOST=$IC_HOST"
+# `-y` skips the Candid breaking-change prompt. The check warns when
+# the new wasm's interface isn't a subtype of the old — useful for
+# canisters with third-party clients, but dfinsight's only client is
+# its own frontend, which deploys atomically with the backend.
 CANISTER_ID_DFINSIGHT_BACKEND="$BACKEND_ID" \
 VITE_IC_HOST="$IC_HOST" \
-  icp deploy -e "$ENV" "${PASSTHROUGH[@]}"
+  icp deploy -e "$ENV" -y "${PASSTHROUGH[@]}"
 
 log "[5/6] Calling dfinsight_backend.setRpOrigin(\"$ORIGIN\")"
 icp canister call dfinsight_backend setRpOrigin "(\"$ORIGIN\")" \

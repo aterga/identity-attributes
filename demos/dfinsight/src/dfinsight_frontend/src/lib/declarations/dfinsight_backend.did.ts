@@ -41,6 +41,9 @@ export const idlFactory = ({ IDL }: { IDL: any }) => {
     NotFound: IDL.Null,
     Empty: IDL.Null,
     SessionExpired: IDL.Null,
+    AlreadyAdmin: IDL.Null,
+    UnknownAdmin: IDL.Null,
+    LastAdmin: IDL.Null,
   });
 
   const IssueForUser = IDL.Record({
@@ -107,5 +110,7 @@ export const idlFactory = ({ IDL }: { IDL: any }) => {
       [Result(IDL.Null, AdminError)],
       [],
     ),
+    addAdmin: IDL.Func([IDL.Text], [Result(IDL.Null, AdminError)], []),
+    removeAdmin: IDL.Func([IDL.Text], [Result(IDL.Null, AdminError)], []),
   });
 };

@@ -27,6 +27,10 @@ function formatAdminError(e: AdminError): string {
   if ("SessionExpired" in e) return "Session expired — sign in again.";
   if ("NotFound" in e) return "Issue not found.";
   if ("Empty" in e) return "Response can't be empty.";
+  if ("AlreadyAdmin" in e) return "That name is already an admin.";
+  if ("UnknownAdmin" in e) return "That name is not on the admin list.";
+  if ("LastAdmin" in e)
+    return "Refused — that's the last admin. Add another first.";
   return "Unknown error.";
 }
 

@@ -116,10 +116,12 @@ The admin allowlist is the actor-class init arg, declared as
 init_args: '(vec { "Arshavir Ter-Gabrielyan" })'
 ```
 
-Edit it before the first deploy. Names must match the verified
-`sso:dfinity.org:name` exactly. The list is stable, so on a running
-canister you'd need `icp deploy --mode reinstall` (state-wiping) to
-change it — or add a controller-gated `setAdmins` setter.
+This seeds the bootstrap list on first install. Names must match the
+verified `sso:dfinity.org:name` exactly. After install, any current
+admin can grow or shrink the list via `addAdmin` / `removeAdmin` from
+the admin panel — the list is stable, so changes survive upgrades.
+Removing the last admin is refused (`#LastAdmin`) to prevent locking
+the canister out of admin operations.
 
 ## Anti-bias design
 
@@ -143,4 +145,5 @@ Once an admin responds, voting on that issue is locked
 | 30-min admin session cache     | `main.mo:adminSessions`                        |
 | 1-click SSO                    | `auth.ts:signInAnonymous`                      |
 | 1-click SSO + name attribute   | `auth.ts:signInAdmin`                          |
+| Admin add/remove (gated)       | `main.mo:addAdmin` / `removeAdmin`             |
 | Shuffle                        | `main.mo:shuffle`                              |

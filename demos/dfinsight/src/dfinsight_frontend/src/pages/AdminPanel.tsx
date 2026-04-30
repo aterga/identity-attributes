@@ -18,7 +18,12 @@ function formatAdminError(e: AdminError): string {
     return `You signed in as "${e.NotAdmin.name}", which is not an admin.\nCurrent admins: ${e.NotAdmin.admins.join(", ")}`;
   }
   if ("NotFound" in e) return "Issue not found.";
-  if ("Empty" in e) return "Response can't be empty.";
+  if ("Empty" in e) return "Name or response can't be empty.";
+  if ("AlreadyAdmin" in e) return "That name is already an admin.";
+  if ("UnknownAdmin" in e) return "That name is not on the admin list.";
+  if ("LastAdmin" in e)
+    return "Refused — that's the last admin. Add another first.";
+  if ("SessionExpired" in e) return "Admin session expired — sign in again.";
   return "Unknown error.";
 }
 
@@ -26,6 +31,8 @@ export function AdminPanel() {
   const navigate = useNavigate();
   const session = sessionStore.get();
   const [issues, setIssues] = useState<IssueForAdmin[]>([]);
+  const [admins, setAdmins] = useState<string[]>([]);
+  const [adminDraft, setAdminDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [responseDraft, setResponseDraft] = useState<Record<string, string>>(
@@ -45,12 +52,16 @@ export function AdminPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await session.backend.adminListIssues();
-      if ("err" in res) {
-        setError(formatAdminError(res.err));
+      const [issuesRes, adminList] = await Promise.all([
+        session.backend.adminListIssues(),
+        session.backend.listAdmins(),
+      ]);
+      if ("err" in issuesRes) {
+        setError(formatAdminError(issuesRes.err));
         return;
       }
-      setIssues(res.ok);
+      setIssues(issuesRes.ok);
+      setAdmins(adminList);
     } finally {
       setLoading(false);
     }
@@ -83,6 +94,34 @@ export function AdminPanel() {
     await refresh();
   }
 
+  async function onAddAdmin() {
+    if (!session || session.kind !== "admin") return;
+    const name = adminDraft.trim();
+    if (name.length === 0) return;
+    const res = await session.backend.addAdmin(name);
+    if ("err" in res) {
+      setError(formatAdminError(res.err));
+      return;
+    }
+    setAdminDraft("");
+    await refresh();
+  }
+
+  async function onRemoveAdmin(name: string) {
+    if (!session || session.kind !== "admin") return;
+    const self = name === session.name;
+    const prompt = self
+      ? `Remove yourself ("${name}") from the admin list? You'll keep this session until it expires, but won't be able to sign in again.`
+      : `Remove "${name}" from the admin list?`;
+    if (!confirm(prompt)) return;
+    const res = await session.backend.removeAdmin(name);
+    if ("err" in res) {
+      setError(formatAdminError(res.err));
+      return;
+    }
+    await refresh();
+  }
+
   async function onSignOut() {
     await signOut();
     sessionStore.set(null);
@@ -103,6 +142,41 @@ export function AdminPanel() {
       {error && <pre className="error">{error}</pre>}
 
       {loading && <p>Loading…</p>}
+
+      <details className="admins">
+        <summary>Admins ({admins.length})</summary>
+        <ul>
+          {admins.map((name) => (
+            <li key={name} className="row">
+              <span>{name}</span>
+              <button
+                className="ghost danger"
+                onClick={() => void onRemoveAdmin(name)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="respond">
+          <input
+            type="text"
+            placeholder="Full name (matches sso:dfinity.org:name)"
+            value={adminDraft}
+            onChange={(e) => setAdminDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void onAddAdmin();
+            }}
+          />
+          <button
+            className="primary"
+            disabled={adminDraft.trim().length === 0}
+            onClick={() => void onAddAdmin()}
+          >
+            Add admin
+          </button>
+        </div>
+      </details>
 
       <ul className="issues">
         {!loading && issues.length === 0 && (

@@ -28,7 +28,10 @@ export type AdminError =
   | { NotAdmin: { name: string; admins: string[] } }
   | { NotFound: null }
   | { Empty: null }
-  | { SessionExpired: null };
+  | { SessionExpired: null }
+  | { AlreadyAdmin: null }
+  | { UnknownAdmin: null }
+  | { LastAdmin: null };
 
 export type Result<T, E> = { ok: T } | { err: E };
 
@@ -69,4 +72,6 @@ export interface DfinsightBackend {
   adminListIssues: ActorMethod<[], Result<IssueForAdmin[], AdminError>>;
   adminDeleteIssue: ActorMethod<[bigint], Result<null, AdminError>>;
   adminRespond: ActorMethod<[bigint, string], Result<null, AdminError>>;
+  addAdmin: ActorMethod<[string], Result<null, AdminError>>;
+  removeAdmin: ActorMethod<[string], Result<null, AdminError>>;
 }
