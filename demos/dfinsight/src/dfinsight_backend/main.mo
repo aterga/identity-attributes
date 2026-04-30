@@ -1,6 +1,8 @@
 import II         "mo:identity-attributes";
 import Challenges "mo:identity-attributes/Challenges";
 
+import Origin     "Origin";
+
 import Map        "mo:core/Map";
 import Principal  "mo:core/Principal";
 import Text       "mo:core/Text";
@@ -28,8 +30,12 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // --------------------------------------------------------------- config --
 
-  // Origin of *this* dapp (the relying party) — must match the
-  // `implicit:origin` field that id.ai bakes into attribute bundles.
+  // Origin of *this* dapp (the relying party). Stored in *canonical*
+  // form (the `https://<id>.icp0.io` URL the user actually loads in
+  // the browser). At verify time we run it through
+  // `Origin.remapToLegacyDomain` because id.ai/II rewrite
+  // `.icp0.io` → `.ic0.app` for principal-derivation stability and
+  // attest the legacy form in the bundle's `implicit:origin`.
   //
   // Defaults to the local Vite dev server. For mainnet, the controller
   // calls `setRpOrigin("https://<frontend-id>.icp0.io")` once after the
@@ -288,7 +294,9 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   func verifyAdminAttributes<system>(caller : Principal) : Result.Result<Text, AdminError> {
     let attrs = switch (II.verify<system>({
       policy = #Authorization {
-        expectedOrigin = rpOrigin;
+        // II attests the legacy `.ic0.app` form even when the user
+        // loaded the page from `.icp0.io` — see `Origin.mo`.
+        expectedOrigin = Origin.remapToLegacyDomain(rpOrigin);
         maxAgeNs       = maxAttrAgeNs;
       };
       caller;
