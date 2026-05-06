@@ -168,7 +168,7 @@ function bytesEqual(
 function verifyAttributesLocally(
   decoded: ICRC3Value,
   opts: {
-    expectedRpOrigin: string; // already remapped via remapToLegacyDomain
+    expectedRpOrigin: string;
     expectedNonce: Uint8Array;
     nowNs: bigint;
     maxAgeNs: bigint;
@@ -185,9 +185,11 @@ function verifyAttributesLocally(
   const lookup = new Map<string, ICRC3Value>(decoded.Map);
   const checks: AttrCheck[] = [];
 
-  // 1. implicit:origin — what II attests to MUST equal what we expect
-  //    (after applying `remapToLegacyDomain`, since II maps icp0.io →
-  //    ic0.app for principal stability).
+  // 1. implicit:origin — what II attests to MUST equal what we expect.
+  //    As of the latest II release, II canonicalises this to
+  //    `<canister>.icp0.io` regardless of which URL the user actually
+  //    loaded the page from, so a literal compare against
+  //    `window.location.origin` is enough.
   const originVal = lookup.get("implicit:origin");
   const actualOrigin =
     originVal && "Text" in originVal ? originVal.Text : null;
@@ -384,20 +386,6 @@ const ALLOWED_DOMAIN = "dfinity.org";
 // the canister-side `maxAttrAgeNs` in `src/Main.mo` so the eager local
 // check matches what `II.verify<system>` will enforce.
 const MAX_ATTR_AGE_NS = 5n * 60n * 1_000_000_000n;
-
-// Copied verbatim from the II repo at
-// `src/frontend/src/lib/utils/iiConnection.ts:998` so this demo's local
-// origin check matches what II actually attests to in the bundle's
-// `implicit:origin`. II rewrites the new `<canister>.icp0.io` domain
-// back to `<canister>.ic0.app` to keep principals stable for dapps that
-// pre-date the icp0.io rollout.
-function remapToLegacyDomain(origin: string): string {
-  const ORIGIN_MAPPING_REGEX =
-    /^https:\/\/(?<subdomain>[\w-]+(?:\.raw)?)\.icp0\.io$/;
-  const match = origin.match(ORIGIN_MAPPING_REGEX);
-  const subdomain = match?.groups?.subdomain;
-  return subdomain !== undefined ? `https://${subdomain}.ic0.app` : origin;
-}
 
 // Default attribute keys we ask II to include in the bundle. Override
 // with `?keys=email,sso:dfinity.org:email,name` (comma-separated) for
@@ -799,12 +787,11 @@ async function signIn() {
         log("    " + k + " = " + renderValue(v));
       }
     }
-    const expectedRpOrigin = remapToLegacyDomain(window.location.origin);
     // pendingNonce already resolved by the time we get here (we awaited
     // it inside attrsPromise above), so this is a no-cost re-await.
     const nonceForVerify = await pendingNonce;
     verifyResult = verifyAttributesLocally(decoded, {
-      expectedRpOrigin,
+      expectedRpOrigin: window.location.origin,
       expectedNonce: nonceForVerify,
       nowNs: BigInt(Date.now()) * 1_000_000n,
       maxAgeNs: MAX_ATTR_AGE_NS,
