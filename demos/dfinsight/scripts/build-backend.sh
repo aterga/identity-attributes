@@ -6,6 +6,20 @@ set -euo pipefail
 # Requires `mops` (npm i -g ic-mops) and a moc toolchain installed via
 # `mops toolchain use moc`. Both are checked into mops.toml so a fresh
 # clone only needs `mops install` once.
+#
+# Node 22+ note: `ic-mops` 1.x uses ESM features that don't exist in
+# older Node runtimes. icp-cli's spawned subshell may default to
+# whatever `which node` resolves to, which on macOS+nvm is often a
+# stale v20. If nvm is available, source it and switch to a current
+# Node before running `mops`.
+if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+  # shellcheck disable=SC1091
+  . "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+  # Prefer 24, fall back to whatever LTS is installed. `>/dev/null`
+  # because nvm prints to stdout and we don't want it polluting the
+  # build log.
+  nvm use 24 >/dev/null 2>&1 || nvm use --lts >/dev/null 2>&1 || true
+fi
 
 cd "$(dirname "$0")/.."
 cd src/dfinsight_backend

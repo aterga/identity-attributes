@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v0.1.0/docs/schemas/icp-yaml-schema.json
+# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v0.2.0/docs/schemas/icp-yaml-schema.json
 #
 # icp-cli project config (replaces the old dfx.json). See
 # https://cli.internetcomputer.org/0.2/ for the full reference.
@@ -39,9 +39,10 @@ canisters:
 
     # Bootstrap admin allowlist, passed to the actor class on first
     # install. Names must match the verified `sso:dfinity.org:name`
-    # exactly. Stable across upgrades — to change the list on a
-    # running canister you'd need `icp deploy --mode reinstall` (which
-    # wipes all state) or to add a controller-gated setter.
+    # exactly. The list is a stable `var`, so `init_args` only seeds it
+    # on the very first install — subsequent upgrades preserve the
+    # canister's current list. To change the list on a running canister
+    # use `addAdmin` / `removeAdmin` from the admin panel.
     init_args: '(vec { "Arshavir Ter-Gabrielyan"; "Thomas Gladdines" })'
 
     # `rpOrigin` is a separate stable `var` with a controller-gated
