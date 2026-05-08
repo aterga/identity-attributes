@@ -49,6 +49,12 @@
         border-radius: 4px;
         font-size: 0.85rem;
       }
+      /* Without this, `.controls`'s `display: flex` overrides the
+         user-agent `[hidden] { display: none }` and the developer-only
+         II-instance selector leaks into non-debug mode. */
+      .controls[hidden] {
+        display: none;
+      }
       .controls label { color: #555; }
       .controls code {
         background: #eef;
@@ -97,8 +103,7 @@
     <div class="row">
       <button id="signIn" disabled>Sign in with II</button>
       <button id="join" hidden>Join round</button>
-      <button id="match" hidden>My match</button>
-      <button id="reset" hidden>Reset</button>
+      <button id="reset" hidden>Leave round</button>
     </div>
     <pre id="log"></pre>
     <script type="module" src="/src/main.ts"></script>

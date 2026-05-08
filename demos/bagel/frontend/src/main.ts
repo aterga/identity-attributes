@@ -168,7 +168,7 @@ function bytesEqual(
 function verifyAttributesLocally(
   decoded: ICRC3Value,
   opts: {
-    expectedRpOrigin: string; // already remapped via remapToLegacyDomain
+    expectedRpOrigin: string;
     expectedNonce: Uint8Array;
     nowNs: bigint;
     maxAgeNs: bigint;
@@ -185,9 +185,11 @@ function verifyAttributesLocally(
   const lookup = new Map<string, ICRC3Value>(decoded.Map);
   const checks: AttrCheck[] = [];
 
-  // 1. implicit:origin — what II attests to MUST equal what we expect
-  //    (after applying `remapToLegacyDomain`, since II maps icp0.io →
-  //    ic0.app for principal stability).
+  // 1. implicit:origin — what II attests to MUST equal what we expect.
+  //    As of the latest II release, II canonicalises this to
+  //    `<canister>.icp0.io` regardless of which URL the user actually
+  //    loaded the page from, so a literal compare against
+  //    `window.location.origin` is enough.
   const originVal = lookup.get("implicit:origin");
   const actualOrigin =
     originVal && "Text" in originVal ? originVal.Text : null;
@@ -385,20 +387,6 @@ const ALLOWED_DOMAIN = "dfinity.org";
 // check matches what `II.verify<system>` will enforce.
 const MAX_ATTR_AGE_NS = 5n * 60n * 1_000_000_000n;
 
-// Copied verbatim from the II repo at
-// `src/frontend/src/lib/utils/iiConnection.ts:998` so this demo's local
-// origin check matches what II actually attests to in the bundle's
-// `implicit:origin`. II rewrites the new `<canister>.icp0.io` domain
-// back to `<canister>.ic0.app` to keep principals stable for dapps that
-// pre-date the icp0.io rollout.
-function remapToLegacyDomain(origin: string): string {
-  const ORIGIN_MAPPING_REGEX =
-    /^https:\/\/(?<subdomain>[\w-]+(?:\.raw)?)\.icp0\.io$/;
-  const match = origin.match(ORIGIN_MAPPING_REGEX);
-  const subdomain = match?.groups?.subdomain;
-  return subdomain !== undefined ? `https://${subdomain}.ic0.app` : origin;
-}
-
 // Default attribute keys we ask II to include in the bundle. Override
 // with `?keys=email,sso:dfinity.org:email,name` (comma-separated) for
 // triage — useful when comparing what beta II returns for scoped vs
@@ -440,7 +428,6 @@ const $gate       = document.getElementById("gate")!;
 const $log        = document.getElementById("log")!;
 const $signIn     = document.getElementById("signIn") as HTMLButtonElement;
 const $join       = document.getElementById("join")   as HTMLButtonElement;
-const $match      = document.getElementById("match")  as HTMLButtonElement;
 const $reset      = document.getElementById("reset")  as HTMLButtonElement;
 const $iiToggle   = document.getElementById("iiInstance") as HTMLSelectElement;
 const $iiEndpoint = document.getElementById("iiEndpoint")!;
@@ -545,20 +532,9 @@ function setSignedIn(
     );
 
   if (registered) {
-    // Successful end state — Sign In has done its job, hide it. The
-    // round-trip buttons appear here for the first time.
-    $gate.className = "gate gate-ok";
-    $gate.innerHTML =
-      `Welcome, <code>${escapeHtml((register as { ok: { email: string } }).ok.email)}</code> ` +
-      `— canister verified the bundle, you're cleared for coffee.`;
-    $gate.hidden = false;
-    $signIn.hidden = true;
-    $join.hidden = false;
-    $match.hidden = false;
-    $reset.hidden = false;
-    $join.disabled = false;
-    $match.disabled = false;
-    $reset.disabled = false;
+    // Hand off to `setReadyToJoin` — the post-sign-in state is just
+    // "verified human, ready to find a partner" with one action.
+    setReadyToJoin((register as { ok: { email: string } }).ok.email);
     return;
   }
 
@@ -599,9 +575,108 @@ function setSignedIn(
   // Tell the user to reload (which kicks off a fresh nonce + AuthClient).
   $signIn.hidden = true;
   $join.hidden = true;
-  $match.hidden = true;
   $reset.hidden = true;
   $iiToggle.disabled = false;
+}
+
+// ---------------------------------------------------------- post-sign-in --
+// Three states after registration. At any time exactly one button is
+// visible — "one view, one action".
+//
+//   Ready    : "Welcome <email>"                          → [Join round]
+//   Looking  : "Looking for a partner… 🥯"   (auto-poll)  → [Leave round]
+//   Paired   : "Paired with <partner_email>"              → [Leave round]
+//
+// `Reset` reuses the bagel canister's `reset()` method and is rendered
+// as "Leave round" in this restructured UI.
+
+let signedInEmail: string | null = null;
+let lookingPollHandle: number | null = null;
+
+function stopLookingPoll() {
+  if (lookingPollHandle !== null) {
+    clearInterval(lookingPollHandle);
+    lookingPollHandle = null;
+  }
+}
+
+function setReadyToJoin(email: string) {
+  signedInEmail = email;
+  stopLookingPoll();
+  $gate.className = "gate gate-ok";
+  $gate.innerHTML =
+    `Welcome, <code>${escapeHtml(email)}</code>. Click <em>Join round</em> ` +
+    `to be paired with another DFINITY human for coffee.`;
+  $gate.hidden = false;
+  $signIn.hidden = true;
+  $join.hidden = false;
+  $reset.hidden = true;
+  $join.disabled = false;
+}
+
+function lookingBanner(poolSize: bigint | null): string {
+  const subline =
+    poolSize === 1n
+      ? `you're the only one waiting right now. Open this page in another ` +
+        `browser (or sign in with another DFINITY account) to test pairing.`
+      : poolSize !== null && poolSize >= 2n
+        ? `${poolSize} people are waiting — should be paired any second now…`
+        : `keep this tab open. We'll let you know as soon as someone joins.`;
+  return (
+    `<span class="spin" aria-hidden="true">🥯</span> ` +
+    `Looking for a partner — ${subline}`
+  );
+}
+
+function setLooking() {
+  $gate.className = "gate gate-busy";
+  $gate.innerHTML = lookingBanner(null);
+  $gate.hidden = false;
+  $signIn.hidden = true;
+  $join.hidden = true;
+  $reset.hidden = false;
+  $reset.disabled = false;
+
+  // Poll the canister every 3 s. We fetch both:
+  //  - `my_match()`: did someone show up while we were waiting?
+  //    (The partner who triggered the pairing learns from
+  //    `join_round`'s own response — but the user who got here via
+  //    `#Waiting` finds out here.)
+  //  - `pool_size()`: how many people (incl. us) are alone in the
+  //    pool right now? Surfaces a useful "you're solo, try another
+  //    browser" hint when the user is the only DFINITY human awake.
+  stopLookingPoll();
+  lookingPollHandle = window.setInterval(async () => {
+    if (!bagel) return;
+    try {
+      const [opt, size] = await Promise.all([
+        bagel.my_match(),
+        bagel.pool_size(),
+      ]);
+      const partner = opt[0];
+      if (partner !== undefined) {
+        setPaired(partner);
+        return;
+      }
+      // Still waiting — refresh the subline only if the count changed.
+      $gate.innerHTML = lookingBanner(size);
+    } catch (e) {
+      log("  poll error:", String(e));
+    }
+  }, 3000);
+}
+
+function setPaired(partnerEmail: string) {
+  stopLookingPoll();
+  $gate.className = "gate gate-ok";
+  $gate.innerHTML =
+    `🥯 You're paired with <code>${escapeHtml(partnerEmail)}</code> ` +
+    `— say hi and grab a coffee!`;
+  $gate.hidden = false;
+  $signIn.hidden = true;
+  $join.hidden = true;
+  $reset.hidden = false;
+  $reset.disabled = false;
 }
 
 function showVerifying() {
@@ -612,9 +687,18 @@ function showVerifying() {
   $gate.hidden = false;
   $signIn.disabled = true;
   $join.disabled = true;
-  $match.disabled = true;
   $reset.disabled = true;
   $iiToggle.disabled = true;
+}
+
+function showJoining() {
+  $gate.className = "gate gate-busy";
+  $gate.innerHTML =
+    `<span class="spin" aria-hidden="true">🥯</span> ` +
+    `Joining the round…`;
+  $gate.hidden = false;
+  $join.disabled = true;
+  $reset.disabled = true;
 }
 
 function escapeHtml(s: string): string {
@@ -703,12 +787,11 @@ async function signIn() {
         log("    " + k + " = " + renderValue(v));
       }
     }
-    const expectedRpOrigin = remapToLegacyDomain(window.location.origin);
     // pendingNonce already resolved by the time we get here (we awaited
     // it inside attrsPromise above), so this is a no-cost re-await.
     const nonceForVerify = await pendingNonce;
     verifyResult = verifyAttributesLocally(decoded, {
-      expectedRpOrigin,
+      expectedRpOrigin: window.location.origin,
       expectedNonce: nonceForVerify,
       nowNs: BigInt(Date.now()) * 1_000_000n,
       maxAgeNs: MAX_ATTR_AGE_NS,
@@ -825,29 +908,56 @@ function formatJoin(r: JoinResult): string {
 
 async function join() {
   if (!bagel) return;
-
   log("→ calling join_round()");
+  showJoining();
   try {
     const res = await bagel.join_round();
     log("  result:", formatJoin(res));
     log("  raw:", res);
+    if ("ok" in res) {
+      if ("Paired" in res.ok) {
+        setPaired(res.ok.Paired.email);
+      } else {
+        setLooking();
+      }
+    } else {
+      // `#NotRegistered` shouldn't happen here (we just registered),
+      // but surface it cleanly if it does.
+      $gate.className = "gate gate-block";
+      $gate.textContent = "Canister says we aren't registered. Reload to try again.";
+      $gate.hidden = false;
+      $join.hidden = true;
+      $reset.hidden = true;
+    }
   } catch (e) {
     log("  ERROR:", String(e));
+    $gate.className = "gate gate-block";
+    $gate.innerHTML = `Couldn't join the round: <code>${escapeHtml(String(e))}</code>.`;
+    $gate.hidden = false;
+    if (signedInEmail !== null) {
+      // Let them retry — back to ready state.
+      $join.hidden = false;
+      $join.disabled = false;
+      $reset.hidden = true;
+    }
   }
 }
 
-async function myMatch() {
-  if (!bagel) return;
-  log("→ calling my_match()");
-  const opt = await bagel.my_match();
-  log("  result:", opt.length === 0 ? "no match yet" : opt[0]);
-}
-
-async function reset() {
+async function leaveRound() {
   if (!bagel) return;
   log("→ calling reset()");
-  await bagel.reset();
-  log("  done");
+  $reset.disabled = true;
+  try {
+    await bagel.reset();
+    log("  done");
+  } catch (e) {
+    log("  ERROR:", String(e));
+  }
+  // Back to "ready to join" — the email is still trusted by the canister
+  // (`registered` map persists), so no re-sign-in needed.
+  if (signedInEmail !== null) {
+    setReadyToJoin(signedInEmail);
+  }
 }
 
 // ------------------------------------------------------------ wire up UI --
@@ -855,8 +965,7 @@ $signIn.addEventListener("click", () => {
   signIn().catch((e) => log("ERROR:", String(e)));
 });
 $join.addEventListener("click", () => join());
-$match.addEventListener("click", () => myMatch());
-$reset.addEventListener("click", () => reset());
+$reset.addEventListener("click", () => leaveRound());
 
 // Flipping the toggle before sign-in changes which II the eventual click
 // will talk to. After sign-in we disable it (see `setSignedIn`). A full

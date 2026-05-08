@@ -5,7 +5,6 @@ import Principal  "mo:core/Principal";
 import Text       "mo:core/Text";
 import Iter       "mo:core/Iter";
 import Result     "mo:core/Result";
-import Origin     "./Origin";
 
 /// Bagel — a pairs-you-for-coffee demo, gated to @dfinity.org users via
 /// Internet Identity certified attributes.
@@ -39,28 +38,21 @@ import Origin     "./Origin";
 ///       attacker can't reuse someone else's bundle.
 persistent actor Bagel {
 
-  // The canonical origin where this app is hosted — the new `.icp0.io`
-  // domain. Both `<id>.icp0.io` and the legacy `<id>.ic0.app` URLs
-  // serve the same asset canister, but II's `remapToLegacyDomain`
-  // rewrites `.icp0.io` → `.ic0.app` for principal stability. Whatever
-  // URL the user actually loaded the page from, II will attest to the
-  // `.ic0.app` form in the bundle's `implicit:origin`. We feed our
-  // canonical origin through the same remap so `expectedOrigin`
-  // matches what II actually puts in the bundle.
+  // The origin where this app is hosted. As of the latest II release,
+  // II puts this canonical `.icp0.io` form into the bundle's
+  // `implicit:origin` regardless of which domain the user actually
+  // loaded the page from, so we no longer need a canister-side remap
+  // to the legacy `.ic0.app` domain.
   //
-  // `transient` is critical here — in a `persistent actor`, regular
-  // `let` bindings are evaluated on the *initial* install only, and
-  // their values are preserved across upgrades. We changed the
-  // expected-origin form after the canister was first deployed, but
-  // the upgrade kept the original `icp0.io` value, which is why earlier
-  // attempts kept failing with `OriginMismatch`. `transient` re-evaluates
-  // the right-hand side on every upgrade, so source-level changes
-  // actually take effect.
-  transient let rpOriginCanonical : Text = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
-  transient let rpOrigin : Text          = Origin.remapToLegacyDomain(rpOriginCanonical);
-  transient let nonceTtlNs : Nat         = 5 * 60 * 1_000_000_000;      // 5 min
-  transient let maxAttrAgeNs : Nat       = 5 * 60 * 1_000_000_000;      // 5 min
-  transient let allowedDomain : Text     = "dfinity.org";
+  // `transient` is critical — in a `persistent actor`, regular `let`
+  // bindings are evaluated on the *initial* install only, and their
+  // values are preserved across upgrades. `transient` re-evaluates the
+  // right-hand side on every upgrade so source-level changes actually
+  // take effect.
+  transient let rpOrigin : Text       = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
+  transient let nonceTtlNs : Nat      = 5 * 60 * 1_000_000_000;      // 5 min
+  transient let maxAttrAgeNs : Nat    = 5 * 60 * 1_000_000_000;      // 5 min
+  transient let allowedDomain : Text  = "dfinity.org";
 
   // Nonces are canister-global (see module doc) — stored under and
   // consumed against the anonymous principal, regardless of who's calling.
@@ -173,12 +165,23 @@ persistent actor Bagel {
   /// Leave the waiting pool and drop any existing pairing. Doesn't
   /// un-register — the principal stays known until the canister is
   /// reset, so the caller can re-join without going through II again.
+  ///
+  /// When the caller is currently paired, the *partner* gets returned
+  /// to `pool` (with their email re-attached) instead of being stranded
+  /// in a "floating" state where they're neither paired nor waiting.
+  /// They didn't choose to leave, so we let them be picked up by the
+  /// next arrival without requiring any action on their end. Their UI
+  /// may continue to show a stale "Paired with <caller>" until they
+  /// navigate away or re-Join, but the canister state is consistent
+  /// and a re-arriving caller (or any other DFINITY human) will
+  /// re-pair with them seamlessly.
   public shared ({ caller }) func reset() : async () {
     Map.remove(pool, Principal.compare, caller);
     switch (Map.take(matches, Principal.compare, caller)) {
       case null {};
-      case (?(partner, _)) {
+      case (?(partner, partnerEmail)) {
         Map.remove(matches, Principal.compare, partner);
+        Map.add(pool, Principal.compare, partner, partnerEmail);
       };
     };
   };
