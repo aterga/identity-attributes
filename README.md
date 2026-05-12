@@ -44,11 +44,7 @@ persistent actor {
     if (Principal.isAnonymous(caller)) Runtime.trap("anonymous");
 
     let result = switch (ii.verify<system>({
-      action         = "register";    // must match the issueNonce call
-      // FE used a 1-click OpenID flow (Google here). Use ?#Apple,
-      // ?#Microsoft, ?#OpenId "<url>" for other 1-click providers,
-      // or `null` for the default Internet Identity flow (passkey
-      // or user-picked OpenID provider) — attributes arrive unscoped.
+      action         = "register";
       openIdProvider = ?#Google;
     })) {
       case (#ok r)  r;
@@ -61,27 +57,32 @@ persistent actor {
 };
 ```
 
+`action` must match the value passed to the matching `issueNonce` call.
+
+`openIdProvider` selects which scope to read the bundle's attributes
+from. Set it (`?#Google`, `?#Apple`, `?#Microsoft`, `?#OpenId "<url>"`)
+when the frontend used a 1-click OpenID flow — keys are provider-scoped.
+Use `null` for the default Internet Identity flow (passkey or
+user-picked OpenID provider through the II UI) — keys are unscoped.
+
 ## API
 
 ```motoko
-II.Verifier()                       : Verifier
+II.Verifier(origin)            : Verifier
 
 // Methods on the Verifier instance:
-ii.issueNonce<system>(action)       : async Blob
-ii.verify<system>(config)           : Result<Verified, Error>
+ii.issueNonce<system>(action)  : async Blob
+ii.verify<system>(config)      : Result<Verified, Error>
 
 type Config = {
   action         : Text;
-  // Set to a provider when the FE used a 1-click OpenID flow
-  // (e.g. ?#Google); `null` for the default II flow (passkey or
-  // user-picked OpenID provider, attributes unscoped).
   openIdProvider : ?OpenIdProvider;
 };
 
 type Verified = {
   name       : ?Text;
   email      : ?Text;
-  attributes : Attributes;          // for non-standard keys: attributes.getText(key)
+  attributes : Attributes;
 };
 
 type OpenIdProvider = { #Google; #Apple; #Microsoft; #OpenId : Text };
