@@ -48,7 +48,8 @@ persistent actor Bagel {
   transient let allowedDomain : Text  = "dfinity.org";
   transient let registerAction : Text = "register";
 
-  let nonces     = II.newStore();
+  let store      = II.newStore();
+  transient let ii = II.Verifier(store);
   // Principals known to belong to DFINITY employees, populated by
   // `register()` after the bundle has been fully verified. Subsequent
   // calls (join_round, reset) just look up against this map — no
@@ -77,7 +78,7 @@ persistent actor Bagel {
   /// to call anonymously — the frontend fetches this on page load,
   /// before the user signs in with II.
   public func generate_nonce() : async Blob {
-    await II.issueNonce<system>(nonces, registerAction)
+    await ii.issueNonce<system>(registerAction)
   };
 
   /// Step 3: verify the attribute bundle and register the caller as a
@@ -91,10 +92,9 @@ persistent actor Bagel {
   /// Idempotent: re-registering with a fresh bundle just overwrites the
   /// stored email (e.g. the user signed in to a different II anchor).
   public shared ({ caller }) func register() : async Result.Result<{ email : Text }, RegisterError> {
-    let result = switch (II.verify<system>({
+    let result = switch (ii.verify<system>({
       origin         = rpOrigin;
       maxAgeNs       = null;
-      nonces;
       action         = registerAction;
       // The frontend requests the custom-scoped `sso:dfinity.org:email`
       // key, which is outside the lib's typed `OpenIdProvider` surface.

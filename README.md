@@ -32,23 +32,24 @@ import Principal "mo:core/Principal";
 import Runtime   "mo:core/Runtime";
 
 persistent actor {
-  stable var nonces = II.newStore();
+  // State persists across upgrades; `ii` is rebuilt against it on each upgrade.
+  let          store = II.newStore();
+  transient let ii   = II.Verifier(store);
 
   // Called anonymously by the frontend before II sign-in.
   public shared func registerBegin() : async Blob {
-    await II.issueNonce<system>(nonces, "register")
+    await ii.issueNonce<system>("register")
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared ({ caller }) func registerFinish() : async Text {
     if (Principal.isAnonymous(caller)) Runtime.trap("anonymous");
 
-    let result = switch (II.verify<system>({
+    let result = switch (ii.verify<system>({
       origin         = "https://your-app.icp0.io";
-      maxAgeNs       = null;                // null = 5 min default
-      nonces;
-      action         = "register";          // must match the issue call
-      openIdProvider = ?#Google;            // ?#Apple, ?#Microsoft, ?#OpenId url, or null
+      maxAgeNs       = null;          // null = 5 min default
+      action         = "register";    // must match the issueNonce call
+      openIdProvider = ?#Google;      // ?#Apple, ?#Microsoft, ?#OpenId url, or null
     })) {
       case (#ok r)  r;
       case (#err e) Runtime.trap(debug_show e);
@@ -63,14 +64,16 @@ persistent actor {
 ## API
 
 ```motoko
-II.newStore()                            : Store
-II.issueNonce<system>(store, action)     : async Blob
-II.verify<system>(config)                : Result<Verified, Error>
+II.newStore()                       : Store
+II.Verifier(store)                  : Verifier
+
+// Methods on the Verifier instance:
+ii.issueNonce<system>(action)       : async Blob
+ii.verify<system>(config)           : Result<Verified, Error>
 
 type Config = {
   origin         : Text;
   maxAgeNs       : ?Nat;            // null = II.defaultMaxAgeNs (5 min)
-  nonces         : Store;
   action         : Text;
   openIdProvider : ?OpenIdProvider; // null = passkey / unscoped keys
 };
