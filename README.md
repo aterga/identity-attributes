@@ -60,10 +60,10 @@ persistent actor {
 `action` must match the value passed to the matching `issueNonce` call.
 
 `openIdProvider` selects which scope to read the bundle's attributes
-from. Set it (`?#Google`, `?#Apple`, `?#Microsoft`, `?#OpenId "<url>"`)
-when the frontend used a 1-click OpenID flow — keys are provider-scoped.
-Use `null` for the default Internet Identity flow (passkey or
-user-picked OpenID provider through the II UI) — keys are unscoped.
+from. Match it to the frontend flow:
+
+- `?#Google` / `?#Apple` / `?#Microsoft` / `?#OpenId "<url>"` — frontend used a 1-click OpenID flow; bundle keys arrive provider-scoped.
+- `null` — default Internet Identity flow (passkey or user-picked OpenID provider through the II UI); bundle keys arrive unscoped.
 
 ## API
 
