@@ -45,7 +45,6 @@ persistent actor {
 
     let result = switch (ii.verify<system>({
       origin         = "https://your-app.icp0.io";
-      maxAgeNs       = null;          // null = 5 min default
       action         = "register";    // must match the issueNonce call
       openIdProvider = ?#Google;      // ?#Apple, ?#Microsoft, ?#OpenId url, or null
     })) {
@@ -70,7 +69,6 @@ ii.verify<system>(config)           : Result<Verified, Error>
 
 type Config = {
   origin         : Text;
-  maxAgeNs       : ?Nat;            // null = II.defaultMaxAgeNs (5 min)
   action         : Text;
   openIdProvider : ?OpenIdProvider; // null = passkey / unscoped keys
 };

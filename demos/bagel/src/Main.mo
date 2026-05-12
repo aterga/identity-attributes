@@ -93,7 +93,6 @@ persistent actor Bagel {
   public shared ({ caller }) func register() : async Result.Result<{ email : Text }, RegisterError> {
     let result = switch (ii.verify<system>({
       origin         = rpOrigin;
-      maxAgeNs       = null;
       action         = registerAction;
       // The frontend requests the custom-scoped `sso:dfinity.org:email`
       // key, which is outside the lib's typed `OpenIdProvider` surface.

@@ -298,7 +298,6 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
     let result = switch (ii.verify<system>({
       origin         = rpOrigin;
-      maxAgeNs       = null;
       action         = adminAction;
       openIdProvider = null;
     })) {

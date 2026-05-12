@@ -19,7 +19,6 @@ import Result "mo:core/Result";
 ///   public shared func finish() : async ?Text {
 ///     switch (ii.verify<system>({
 ///       origin         = "https://your-app.icp0.io";
-///       maxAgeNs       = null;
 ///       action         = "register";
 ///       openIdProvider = ?#Google;
 ///     })) {
@@ -37,12 +36,9 @@ module {
 
   public type Config = {
     origin         : Text;
-    maxAgeNs       : ?Nat;
     action         : Text;
     openIdProvider : ?OpenIdProvider;
   };
-
-  public let defaultMaxAgeNs = V.defaultMaxAgeNs;
 
   /// Owns a nonce store internally. Declare as `transient let` in a
   /// `persistent actor` — the store is intentionally throwaway across
@@ -57,7 +53,6 @@ module {
     public func verify<system>(c : Config) : Result.Result<Verified, Error> {
       V.verify<system>({
         origin         = c.origin;
-        maxAgeNs       = c.maxAgeNs;
         nonces         = store;
         action         = c.action;
         openIdProvider = c.openIdProvider;
