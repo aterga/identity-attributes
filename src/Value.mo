@@ -1,7 +1,9 @@
 /// ICRC-3 `Value` tree.
 ///
-/// Mirrors the Candid type used by Internet Identity when it certifies
-/// attribute bundles (`prepare_icrc3_attributes` / `get_icrc3_attributes`).
+/// Mirrors the Candid type Internet Identity uses when it certifies attribute
+/// bundles. Internal to the library — the public surface speaks `Verified`
+/// and the typed accessors on `Attributes`, not raw `Value`.
+///
 /// See: https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-3/README.md
 module {
   public type Value = {
@@ -13,8 +15,8 @@ module {
     #Map   : [(Text, Value)];
   };
 
-  /// Decode a Candid-encoded `Value` blob. Returns `null` if the bytes
-  /// don't match the expected type.
+  /// Candid-decode an ICRC-3 `Value` blob. Returns `null` if the bytes don't
+  /// match the expected type.
   public func decode(b : Blob) : ?Value {
     let v : ?Value = from_candid(b);
     v

@@ -4,107 +4,100 @@ import Int "mo:core/Int";
 import Result "mo:core/Result";
 import Value "./Value";
 import Attributes "./Attributes";
-import Implicit "./Implicit";
 import Challenges "./Challenges";
 
-/// One-shot verification of a certified attribute bundle, parameterised
-/// by a security policy. Wraps the low-level pipeline:
+/// One-shot verification of a certified Internet Identity attribute bundle.
 ///
-///   1. `CallerAttributes.getAttributes<system>()` (signer check done by core)
-///   2. Candid-decode into `Value`
-///   3. `Attributes.fromValue`
-///   4. Policy-specific implicit-field checks (origin / freshness / nonce)
+/// `verify` always enforces every check the bundle needs to be trusted:
+///
+///   1. Signer — handled by `mo:core/CallerAttributes`, which traps unless
+///      the bundle's `sender_info.signer` is listed in the canister's
+///      `trusted_attribute_signers` environment variable. Set this to
+///      `rdmx6-jaaaa-aaaaa-aaadq-cai` (mainnet Internet Identity) in your
+///      `icp.yaml`.
+///   2. Origin — bundle's `implicit:origin` must be in `Config.origins`.
+///   3. Freshness — `implicit:issued_at_timestamp_ns` must be within
+///      `Config.maxAgeNs` of now (default: 5 minutes).
+///   4. Nonce — bundle's `implicit:nonce` must match an unconsumed entry
+///      in `Config.nonces` for `Config.action`, also within `maxAgeNs`.
+///      The matching entry is removed (single-use).
+///
+/// On success, returns a `Verified` view typed under the chosen
+/// `openIdProvider` scope (or default-scope if `null`).
 module {
-  public type Attributes = Attributes.Attributes;
-
-  public type Policy = {
-    #Informational;
-    #Functional    : { maxAgeNs : Nat };
-    #Authorization : { expectedOrigin : Text; maxAgeNs : Nat };
-  };
+  public type Verified = Attributes.Verified;
+  public type OpenIdProvider = Attributes.OpenIdProvider;
 
   public type Config = {
-    policy : Policy;
-    caller : Principal;
-    nonces : ?Challenges.Store;
+    /// Allowed frontend origins. Must be non-empty. The bundle's
+    /// `implicit:origin` must equal one of these strings exactly.
+    origins        : [Text];
+
+    /// Maximum bundle/nonce age. `null` uses `defaultMaxAgeNs` (5 minutes).
+    /// Applied to both the bundle's `implicit:issued_at_timestamp_ns` and
+    /// to the nonce's age in the store.
+    maxAgeNs       : ?Nat;
+
+    /// Nonce store, written to by `Challenges.issue` in the matching
+    /// begin endpoint. `verify` looks up `implicit:nonce` here and
+    /// removes the entry on success.
+    nonces         : Challenges.Store;
+
+    /// Action label binding this verify call to a specific flow. Must
+    /// match the action used at `Challenges.issue` time. Prevents a
+    /// nonce issued for one flow being redeemed against another.
+    action         : Text;
+
+    /// Which OpenID provider's scope to read attributes from. `null` for
+    /// the passkey/default flow (unscoped attribute keys).
+    openIdProvider : ?OpenIdProvider;
   };
 
   public type Error = {
     #NoAttributes;
     #MalformedCandid;
-    #MissingField    : Text;
-    #OriginMismatch  : { expected : Text; got : Text };
-    #Stale           : { ageNs : Nat };
+    #MissingField        : Text;
+    #OriginMismatch      : { expected : [Text]; got : Text };
+    #Stale               : { ageNs : Nat };
     #UnknownNonce;
     #NonceExpired;
-    #MissingNonceStore;
+    #NoOriginsConfigured;
   };
 
-  public func verify<system>(c : Config) : Result.Result<Attributes, Error> {
-    let ?raw = CallerAttributes.getAttributes<system>() else return #err(#NoAttributes);
-    let ?value = Value.decode(raw) else return #err(#MalformedCandid);
-    let ?attrs = Attributes.fromValue(value) else return #err(#MalformedCandid);
+  // 5 minutes in nanoseconds.
+  public let defaultMaxAgeNs : Nat = 300_000_000_000;
 
-    let nowNs = Int.abs(Time.now());
+  public func verify<system>(c : Config) : Result.Result<Verified, Error> {
+    if (c.origins.size() == 0) return #err(#NoOriginsConfigured);
 
-    switch (c.policy) {
-      case (#Informational) { #ok attrs };
+    let ?raw   = CallerAttributes.getAttributes<system>() else return #err(#NoAttributes);
+    let ?value = Value.decode(raw)                         else return #err(#MalformedCandid);
+    let ?attrs = Attributes.fromValue(value)               else return #err(#MalformedCandid);
 
-      case (#Functional { maxAgeNs }) {
-        switch (checkFreshness(attrs, maxAgeNs, nowNs)) {
-          case (#err e) #err e;
-          case _ #ok attrs;
-        };
-      };
+    let nowNs  = Int.abs(Time.now());
+    let maxAge = switch (c.maxAgeNs) { case (?n) n; case null defaultMaxAgeNs };
 
-      case (#Authorization { expectedOrigin; maxAgeNs }) {
-        let ?store = c.nonces else return #err(#MissingNonceStore);
-        switch (checkOrigin(attrs, expectedOrigin)) {
-          case (#err e) return #err e; case _ {};
-        };
-        switch (checkFreshness(attrs, maxAgeNs, nowNs)) {
-          case (#err e) return #err e; case _ {};
-        };
-        switch (checkNonce(attrs, store, c.caller, nowNs)) {
-          case (#err e) return #err e; case _ {};
-        };
-        #ok attrs
-      };
+    // Origin
+    let ?got = attrs.getText("implicit:origin") else return #err(#MissingField "implicit:origin");
+    var matched = false;
+    for (o in c.origins.vals()) { if (o == got) matched := true };
+    if (not matched) return #err(#OriginMismatch { expected = c.origins; got });
+
+    // Bundle freshness — positive clock skew (now < issued) treated as fresh.
+    let ?issued = attrs.getNat("implicit:issued_at_timestamp_ns") else return #err(#MissingField "implicit:issued_at_timestamp_ns");
+    if (nowNs >= issued) {
+      let age = nowNs - issued : Nat;
+      if (age > maxAge) return #err(#Stale { ageNs = age });
     };
-  };
 
-  func checkOrigin(a : Attributes, expected : Text) : Result.Result<(), Error> {
-    switch (Implicit.origin(a)) {
-      case null #err(#MissingField "implicit:origin");
-      case (?got) {
-        if (got == expected) #ok else #err(#OriginMismatch { expected; got })
-      };
+    // Nonce (action-scoped, single-use, also age-bounded by maxAge)
+    let ?bundleNonce = attrs.getBlob("implicit:nonce") else return #err(#MissingField "implicit:nonce");
+    switch (Challenges.consume(c.nonces, c.action, bundleNonce, nowNs, maxAge)) {
+      case (#err(#UnknownNonce)) return #err(#UnknownNonce);
+      case (#err(#Expired))      return #err(#NonceExpired);
+      case (#ok) {};
     };
-  };
 
-  func checkFreshness(a : Attributes, maxAgeNs : Nat, nowNs : Nat) : Result.Result<(), Error> {
-    switch (Implicit.issuedAtNs(a)) {
-      case null #err(#MissingField "implicit:issued_at_timestamp_ns");
-      case (?issued) {
-        if (nowNs < issued) { #ok }              // clock skew: treat as fresh
-        else {
-          let age = nowNs - issued : Nat;
-          if (age <= maxAgeNs) #ok else #err(#Stale { ageNs = age })
-        }
-      };
-    };
-  };
-
-  func checkNonce(a : Attributes, store : Challenges.Store, caller : Principal, nowNs : Nat) : Result.Result<(), Error> {
-    switch (Implicit.nonce(a)) {
-      case null #err(#MissingField "implicit:nonce");
-      case (?n) {
-        switch (Challenges.consume(store, caller, n, nowNs)) {
-          case (#ok) #ok;
-          case (#err(#UnknownNonce)) #err(#UnknownNonce);
-          case (#err(#Expired))      #err(#NonceExpired);
-        }
-      };
-    };
+    #ok(Attributes.asProvider(attrs, c.openIdProvider))
   };
 };
