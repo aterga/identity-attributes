@@ -15,34 +15,30 @@ import Result     "mo:core/Result";
 ///   2. Frontend opens II with `requestAttributes({ keys: [...], nonce })`.
 ///   3. Frontend wraps the returned `SignedAttributes` into an
 ///      `AttributesIdentity` and calls `register()`. The canister verifies
-///      the bundle (Authorization tier — origin + freshness + nonce),
-///      reads `email`, checks the @dfinity.org suffix, and remembers the
-///      caller's principal in `registered`. From that point on the caller
-///      is a known DFINITY employee — subsequent calls don't need the
-///      bundle attached, the principal alone is sufficient.
+///      the bundle (origin + freshness + nonce, all enforced by
+///      `mo:identity-attributes/verify`), reads `email`, checks the
+///      @dfinity.org suffix, and remembers the caller's principal in
+///      `registered`. From that point on the caller is a known DFINITY
+///      employee — subsequent calls don't need the bundle attached, the
+///      principal alone is sufficient.
 ///   4. Frontend uses a *plain* DelegationIdentity (no AttributesIdentity
 ///      wrap, no `sender_info` on the wire) to call `join_round()`. The
 ///      canister just looks the caller up in `registered` and either
 ///      pairs them with someone already waiting or puts them on the pool.
 ///   5. Caller polls `my_match()` to discover their coffee partner's email.
 ///
-/// Nonce principal note:
-/// `Challenges.Store` is keyed by `Principal`, but we don't want the nonce
-/// to be tied to a specific caller — the frontend pre-fetches it on page
-/// load (before sign-in, so with an anonymous agent), then the *authenticated*
-/// agent consumes it via `register`. To make lookup symmetric we issue
-/// *and* consume under `Principal.anonymous()` — see `anonNonceKey` below.
-/// Replay is still prevented because:
-///   (a) the nonce is single-use (`Challenges.consume` removes on match),
-///   (b) the II signature binds the nonce to the delegated user, so an
-///       attacker can't reuse someone else's bundle.
+/// Nonces are tagged with the `"register"` action label. The lib's nonce
+/// store is shared across actions but lookups are scoped by tag, so a
+/// nonce issued under one action cannot be redeemed against another.
+/// Cross-user replay is prevented by the II signature in the bundle:
+/// a stolen nonce only works alongside a bundle signed *for the caller*
+/// of register — an attacker who steals one ends up registering themselves.
 persistent actor Bagel {
 
   // The origin where this app is hosted. As of the latest II release,
   // II puts this canonical `.icp0.io` form into the bundle's
   // `implicit:origin` regardless of which domain the user actually
-  // loaded the page from, so we no longer need a canister-side remap
-  // to the legacy `.ic0.app` domain.
+  // loaded the page from.
   //
   // `transient` is critical — in a `persistent actor`, regular `let`
   // bindings are evaluated on the *initial* install only, and their
@@ -50,13 +46,8 @@ persistent actor Bagel {
   // right-hand side on every upgrade so source-level changes actually
   // take effect.
   transient let rpOrigin : Text       = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
-  transient let nonceTtlNs : Nat      = 5 * 60 * 1_000_000_000;      // 5 min
-  transient let maxAttrAgeNs : Nat    = 5 * 60 * 1_000_000_000;      // 5 min
   transient let allowedDomain : Text  = "dfinity.org";
-
-  // Nonces are canister-global (see module doc) — stored under and
-  // consumed against the anonymous principal, regardless of who's calling.
-  let anonNonceKey = Principal.anonymous();
+  transient let registerAction : Text = "register";
 
   let nonces     = Challenges.empty();
   // Principals known to belong to DFINITY employees, populated by
@@ -85,10 +76,9 @@ persistent actor Bagel {
   /// Step 1: give the frontend a canister-issued nonce that will later
   /// be matched against `implicit:nonce` in the attribute bundle. Safe
   /// to call anonymously — the frontend fetches this on page load,
-  /// before the user signs in with II. The nonce is stored globally
-  /// (see module doc) so the authenticated consumer can still find it.
+  /// before the user signs in with II.
   public func generate_nonce() : async Blob {
-    await Challenges.issue<system>(nonces, anonNonceKey, nonceTtlNs)
+    await Challenges.issue<system>(nonces, registerAction)
   };
 
   /// Step 3: verify the attribute bundle and register the caller as a
@@ -102,25 +92,22 @@ persistent actor Bagel {
   /// Idempotent: re-registering with a fresh bundle just overwrites the
   /// stored email (e.g. the user signed in to a different II anchor).
   public shared ({ caller }) func register() : async Result.Result<{ email : Text }, RegisterError> {
-    let attrs = switch (II.verify<system>({
-      policy = #Authorization {
-        // `rpOrigin` is the legacy-domain form (see remapToLegacyDomain
-        // above) — matches what II actually attests to in the bundle.
-        expectedOrigin = rpOrigin;
-        maxAgeNs       = maxAttrAgeNs;
-      };
-      // `caller` in the verify config is used *only* to look up the nonce
-      // in the store; everything else (origin, freshness, attribute decode)
-      // is caller-agnostic. We pass `anonNonceKey` to match how
-      // `generate_nonce` issued it.
-      caller = anonNonceKey;
-      nonces = ?nonces;
+    let result = switch (II.verify<system>({
+      origins        = [rpOrigin];
+      maxAgeNs       = null;
+      nonces;
+      action         = registerAction;
+      // The frontend requests the custom-scoped `sso:dfinity.org:email`
+      // key, which is outside the lib's typed `OpenIdProvider` surface.
+      // Leave the typed slot empty and read the email via the escape
+      // hatch below.
+      openIdProvider = null;
     })) {
       case (#err e) { return #err(#Verify e) };
-      case (#ok a)  a;
+      case (#ok r)  r;
     };
 
-    let ?email = II.getText(attrs, "email") else return #err(#NoEmail);
+    let ?email = result.attributes.getText("sso:dfinity.org:email") else return #err(#NoEmail);
     if (not isAllowed(email)) return #err(#WrongDomain { email });
 
     Map.add(registered, Principal.compare, caller, email);

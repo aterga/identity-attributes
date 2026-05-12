@@ -38,14 +38,14 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // `mo:identity-attributes` on every admin verify.
   var rpOrigin : Text = "http://localhost:5173";
 
-  // 5-minute windows are the same defaults the bagel demo uses.
-  let nonceTtlNs   : Nat = 5 * 60 * 1_000_000_000;
-  let maxAttrAgeNs : Nat = 5 * 60 * 1_000_000_000;
+  // Action label distinguishing admin-session nonces from any other
+  // flow that might share this canister later.
+  let adminAction : Text = "establishAdminSession";
 
-  // After a successful Authorization-tier verify we keep the principal
-  // marked as "trusted admin" for this long — so a single sign-in
-  // covers a normal admin session (list, delete, respond, refresh)
-  // without forcing a new II popup per click.
+  // After a successful verify we keep the principal marked as "trusted
+  // admin" for this long — so a single sign-in covers a normal admin
+  // session (list, delete, respond, refresh) without forcing a new II
+  // popup per click.
   let adminSessionNs : Nat = 30 * 60 * 1_000_000_000;
 
   // One issue per user per rolling 24h.
@@ -56,15 +56,13 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // -------------------------------------------------------------- state --
 
-  // Canister-global nonce store, keyed by `anonNonceKey` rather than
-  // the actual caller. The frontend pre-fetches a nonce on page mount
-  // (anonymously, before the admin SSO popup) and the canister later
-  // verifies the bundle under a different principal (the SSO
-  // identity). Storing under a fixed key — and looking up under the
-  // same fixed key — makes issue/verify caller-agnostic. Nonces are
-  // 32-byte random blobs, so sharing the slot is safe: another caller
-  // can't replay yours unless their bundle's signature also covers it.
-  let anonNonceKey = Principal.anonymous();
+  // Canister-global nonce store. Issued and consumed under the
+  // `adminAction` tag; the FE pre-fetches a nonce anonymously on the
+  // admin page mount and the SSO-authenticated caller redeems it during
+  // `establishAdminSession`. Cross-flow replay is prevented by the
+  // action tag; cross-user replay is prevented by the II signature
+  // (any attacker who steals the nonce ends up authenticating as
+  // themselves and the admin allowlist check rejects them).
   let nonces = Challenges.empty();
 
   var nextIssueId : Nat = 0;
@@ -162,13 +160,11 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // -------------------------------------------------------- user API --
 
   /// 32-byte canister-issued nonce. Required for the admin flow's
-  /// Authorization-tier verify; the user flow doesn't need it, but the
-  /// frontend pre-fetches one on every admin-page load (anonymously,
-  /// before the SSO popup) so the click handler stays synchronous.
-  /// Issued under `anonNonceKey` so verify can look it up under the
-  /// same key regardless of who's calling.
+  /// verify; the user flow doesn't need it, but the frontend pre-fetches
+  /// one on every admin-page load (anonymously, before the SSO popup)
+  /// so the click handler stays synchronous.
   public shared func generate_nonce() : async Blob {
-    await Challenges.issue<system>(nonces, anonNonceKey, nonceTtlNs);
+    await Challenges.issue<system>(nonces, adminAction);
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
@@ -293,30 +289,25 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // ------------------------------------------------------- admin API --
 
-  // Full Authorization-tier verify against `mo:identity-attributes`.
-  // Called only by `establishAdminSession`. Returns the verified name
-  // on success.
+  // Full attribute verify against `mo:identity-attributes`. Called only
+  // by `establishAdminSession`. Returns the verified name on success.
+  // The FE requests the custom-scoped `sso:dfinity.org:name` key, which
+  // lives outside the lib's typed `OpenIdProvider` surface — we leave
+  // the typed slot empty and read the name via the attributes escape
+  // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
-    // The `caller` field in `II.verify` is *only* used to look up the
-    // nonce; the actual signing principal is determined from the IC's
-    // `sender_info`. We pass `anonNonceKey` to match how
-    // `generate_nonce` issued it. `establishAdminSession` is the one
-    // that binds the real SSO caller to `adminSessions`.
-    let attrs = switch (II.verify<system>({
-      policy = #Authorization {
-        expectedOrigin = rpOrigin;
-        maxAgeNs       = maxAttrAgeNs;
-      };
-      caller = anonNonceKey;
-      nonces = ?nonces;
+    let result = switch (II.verify<system>({
+      origins        = [rpOrigin];
+      maxAgeNs       = null;
+      nonces;
+      action         = adminAction;
+      openIdProvider = null;
     })) {
       case (#err e) return #err(#Verify e);
-      case (#ok a)  a;
+      case (#ok r)  r;
     };
 
-    // `getText` does scope-fallback, so requesting `"name"` matches
-    // either bare `name` or `sso:dfinity.org:name`.
-    let ?name = II.getText(attrs, "name") else return #err(#NoName);
+    let ?name = result.attributes.getText("sso:dfinity.org:name") else return #err(#NoName);
     if (not isAdmin(name)) {
       return #err(#NotAdmin { name; admins });
     };
@@ -357,9 +348,9 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
     }
   };
 
-  /// Drops the cached admin session — the Authorization-tier bundle
-  /// can no longer be replayed (it was already nonce-consumed) but
-  /// this clears the cache too.
+  /// Drops the cached admin session — the attribute bundle can no
+  /// longer be replayed (it was already nonce-consumed) but this
+  /// clears the cache too.
   public shared ({ caller }) func endAdminSession() : async () {
     Map.remove(adminSessions, Principal.compare, caller);
   };
