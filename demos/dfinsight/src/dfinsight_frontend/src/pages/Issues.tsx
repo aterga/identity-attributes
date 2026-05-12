@@ -12,7 +12,7 @@ function formatPostError(e: PostError): string {
   if ("NotSignedIn" in e) return "You need to sign in.";
   if ("Empty" in e) return "Write something first.";
   if ("TooLong" in e)
-    return `Too long — keep it under ${e.TooLong.maxChars} characters.`;
+    return `Too long. Keep it under ${e.TooLong.maxChars} characters.`;
   if ("DailyLimit" in e) {
     const ns = Number(e.DailyLimit.nextAllowedNs);
     const at = new Date(ns / 1_000_000);
@@ -109,8 +109,11 @@ export function Issues() {
 
   return (
     <section className="card">
+      <p className="marker">§ 02</p>
       <header className="row">
-        <h1>Common matters of interest</h1>
+        <h1>
+          Common matters of <em>interest</em>.
+        </h1>
         <button className="ghost" onClick={onSignOut}>
           Sign out
         </button>
@@ -170,17 +173,18 @@ function IssueRow({
       <p className="body">{issue.body}</p>
       {issue.response.length === 1 && (
         <blockquote className="response">
-          <strong>Response:</strong> {issue.response[0]}
+          <strong>Response</strong>
+          {issue.response[0]}
         </blockquote>
       )}
       <div className="row">
         <button
-          className={issue.upvoted ? "voted" : ""}
+          className={`ghost ${issue.upvoted ? "voted" : ""}`}
           onClick={() => onUpvote(issue.id)}
           disabled={issue.votesLocked}
           title={
             issue.votesLocked
-              ? "Voting closed — admin has responded"
+              ? "Voting closed. Admin has responded."
               : issue.upvoted
                 ? "You upvoted this"
                 : "Upvote"

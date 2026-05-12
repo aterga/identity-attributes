@@ -24,13 +24,13 @@ function formatAdminError(e: AdminError): string {
       `Current admins: ${e.NotAdmin.admins.join(", ")}.`,
     ].join("\n");
   }
-  if ("SessionExpired" in e) return "Session expired — sign in again.";
+  if ("SessionExpired" in e) return "Session expired. Sign in again.";
   if ("NotFound" in e) return "Issue not found.";
   if ("Empty" in e) return "Response can't be empty.";
   if ("AlreadyAdmin" in e) return "That name is already an admin.";
   if ("UnknownAdmin" in e) return "That name is not on the admin list.";
   if ("LastAdmin" in e)
-    return "Refused — that's the last admin. Add another first.";
+    return "Refused. That's the last admin. Add another first.";
   return "Unknown error.";
 }
 
@@ -88,11 +88,15 @@ export function AdminLanding() {
 
   return (
     <section className="card">
-      <h1>Dfinsight — Admin</h1>
+      <p className="marker">§ 03</p>
+      <p className="eyebrow">Verified · sso:dfinity.org:name</p>
+      <h1>
+        Dfinsight <em>admin</em>.
+      </h1>
       <p className="lede">
-        Admins can read every matter of interest with its upvote score, delete
-        spam, and post a public response (which closes voting on that issue).
-        Admins cannot post or upvote — that only happens from the user page.
+        Admins read every matter of interest with its upvote score, delete
+        spam, and post a public response, which closes voting on that issue.
+        Admins cannot post or upvote. That only happens from the user page.
       </p>
       <button
         onClick={onSignIn}
@@ -124,8 +128,8 @@ export function AdminLanding() {
       <details className="info">
         <summary>How does this verify I'm an admin?</summary>
         <p>
-          Sign-in opens id.ai with the DFINITY SSO 1-click flow and requests the
-          verified <code>sso:dfinity.org:name</code> attribute. The backend
+          Sign-in opens id.ai with the DFINITY SSO 1-click flow and requests
+          the verified <code>sso:dfinity.org:name</code> attribute. The backend
           canister reads it via the IC's <code>sender_info</code> mechanism
           (through <code>mo:identity-attributes</code>) and checks the name
           against the allowlist.

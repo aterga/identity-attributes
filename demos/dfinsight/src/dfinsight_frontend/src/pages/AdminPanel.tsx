@@ -11,7 +11,7 @@ import type {
 function formatAdminError(e: AdminError): string {
   if ("Verify" in e) {
     const k = Object.keys(e.Verify)[0];
-    return `Attribute verification failed (${k}). The bundle may have expired — try signing in again.`;
+    return `Attribute verification failed (${k}). The bundle may have expired. Try signing in again.`;
   }
   if ("NoName" in e) return "No name attribute in your SSO bundle.";
   if ("NotAdmin" in e) {
@@ -22,8 +22,8 @@ function formatAdminError(e: AdminError): string {
   if ("AlreadyAdmin" in e) return "That name is already an admin.";
   if ("UnknownAdmin" in e) return "That name is not on the admin list.";
   if ("LastAdmin" in e)
-    return "Refused — that's the last admin. Add another first.";
-  if ("SessionExpired" in e) return "Admin session expired — sign in again.";
+    return "Refused. That's the last admin. Add another first.";
+  if ("SessionExpired" in e) return "Admin session expired. Sign in again.";
   return "Unknown error.";
 }
 
@@ -132,8 +132,11 @@ export function AdminPanel() {
 
   return (
     <section className="card">
+      <p className="marker">§ 04</p>
       <header className="row">
-        <h1>Admin panel</h1>
+        <h1>
+          Admin <em>panel</em>.
+        </h1>
         <button className="ghost" onClick={onSignOut}>
           Sign out
         </button>
@@ -141,7 +144,7 @@ export function AdminPanel() {
 
       {error && <pre className="error">{error}</pre>}
 
-      {loading && <p>Loading…</p>}
+      {loading && <p className="lede">Loading…</p>}
 
       <details className="admins">
         <summary>Admins ({admins.length})</summary>
@@ -193,7 +196,8 @@ export function AdminPanel() {
             <p className="body">{i.body}</p>
             {i.response.length === 1 ? (
               <blockquote className="response">
-                <strong>Response:</strong> {i.response[0]}
+                <strong>Response</strong>
+                {i.response[0]}
               </blockquote>
             ) : (
               <div className="respond">
