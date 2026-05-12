@@ -230,10 +230,15 @@ If Internet Identity changes the bundle format, both halves cut a
 coordinated major — consumers update by bumping both sides, not by
 rewriting decode/check code.
 
-## Demo
+## Demos
 
-[`demos/bagel/`](demos/bagel/) is a small pair-for-coffee canister using
-the previous (`Policy`-based) API and has not yet been ported to v0.2.
+- [`demos/bagel/`](demos/bagel/) — pair-for-coffee canister gated to
+  `@dfinity.org` users via Internet Identity certified attributes.
+- [`demos/dfinsight/`](demos/dfinsight/) — feedback board with
+  user-side posting and an attribute-gated admin role.
+
+Both use the v0.2 API end-to-end and demonstrate the action-tagged
+nonce flow alongside the `verify` + `Verified` shape.
 
 ## Test vectors
 
