@@ -1,4 +1,4 @@
-import Attributes "../src/Attributes";
+import Attributes "../src/Internal/Attributes";
 import Debug "mo:core/Debug";
 
 do {

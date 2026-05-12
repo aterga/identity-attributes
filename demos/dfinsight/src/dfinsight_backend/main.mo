@@ -1,5 +1,4 @@
 import II         "mo:identity-attributes";
-import Challenges "mo:identity-attributes/Challenges";
 
 import Map        "mo:core/Map";
 import Principal  "mo:core/Principal";
@@ -63,7 +62,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // action tag; cross-user replay is prevented by the II signature
   // (any attacker who steals the nonce ends up authenticating as
   // themselves and the admin allowlist check rejects them).
-  let nonces = Challenges.empty();
+  let nonces = II.newStore();
 
   var nextIssueId : Nat = 0;
 
@@ -164,7 +163,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   /// one on every admin-page load (anonymously, before the SSO popup)
   /// so the click handler stays synchronous.
   public shared func generate_nonce() : async Blob {
-    await Challenges.issue<system>(nonces, adminAction);
+    await II.issueNonce<system>(nonces, adminAction);
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
@@ -297,7 +296,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
     let result = switch (II.verify<system>({
-      origins        = [rpOrigin];
+      origin         = rpOrigin;
       maxAgeNs       = null;
       nonces;
       action         = adminAction;

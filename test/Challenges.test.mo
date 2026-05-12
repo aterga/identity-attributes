@@ -1,4 +1,4 @@
-import Challenges "../src/Challenges";
+import Challenges "../src/Internal/Challenges";
 import Debug "mo:core/Debug";
 
 do {

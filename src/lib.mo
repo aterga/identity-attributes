@@ -1,22 +1,42 @@
-import A "./Attributes";
-import C "./Challenges";
-import Vr "./Verify";
+import A "./Internal/Attributes";
+import C "./Internal/Challenges";
+import V "./Internal/Verify";
 
-/// Umbrella module. `import II "mo:identity-attributes"` and reach for
-/// `II.verify`, `II.Challenges.*`, etc.
+/// Verify Internet Identity attribute bundles in relying-party canisters.
+/// Pairs with `@icp-sdk/auth` v7's `requestAttributes` / `AttributesIdentity`.
 ///
-/// Submodules can also be imported individually:
-///   `import Verify "mo:identity-attributes/Verify";`
-///   `import Challenges "mo:identity-attributes/Challenges";`
+/// ```motoko
+/// import II "mo:identity-attributes";
+///
+/// stable var nonces = II.newStore();
+///
+/// public shared func begin() : async Blob {
+///   await II.issueNonce<system>(nonces, "register")
+/// };
+///
+/// public shared func finish() : async ?Text {
+///   switch (II.verify<system>({
+///     origin         = "https://your-app.icp0.io";
+///     maxAgeNs       = null;
+///     nonces;
+///     action         = "register";
+///     openIdProvider = ?#Google;
+///   })) {
+///     case (#ok r)  r.email;
+///     case (#err _) null;
+///   };
+/// };
+/// ```
 module {
-  public type Attributes      = A.Attributes;
-  public type OpenIdProvider  = A.OpenIdProvider;
-  public type Verified        = A.Verified;
-  public type Config          = Vr.Config;
-  public type Error           = Vr.Error;
-  public type Store           = C.Store;
+  public type Store          = C.Store;
+  public type Attributes     = A.Attributes;
+  public type OpenIdProvider = A.OpenIdProvider;
+  public type Verified       = A.Verified;
+  public type Config         = V.Config;
+  public type Error          = V.Error;
 
-  public let verify           = Vr.verify;
-  public let defaultMaxAgeNs  = Vr.defaultMaxAgeNs;
-  public let asProvider       = A.asProvider;
+  public let verify          = V.verify;
+  public let newStore        = C.empty;
+  public let issueNonce      = C.issue;
+  public let defaultMaxAgeNs = V.defaultMaxAgeNs;
 };

@@ -1,5 +1,4 @@
 import II         "mo:identity-attributes";
-import Challenges "mo:identity-attributes/Challenges";
 import Map        "mo:core/Map";
 import Principal  "mo:core/Principal";
 import Text       "mo:core/Text";
@@ -49,7 +48,7 @@ persistent actor Bagel {
   transient let allowedDomain : Text  = "dfinity.org";
   transient let registerAction : Text = "register";
 
-  let nonces     = Challenges.empty();
+  let nonces     = II.newStore();
   // Principals known to belong to DFINITY employees, populated by
   // `register()` after the bundle has been fully verified. Subsequent
   // calls (join_round, reset) just look up against this map — no
@@ -78,7 +77,7 @@ persistent actor Bagel {
   /// to call anonymously — the frontend fetches this on page load,
   /// before the user signs in with II.
   public func generate_nonce() : async Blob {
-    await Challenges.issue<system>(nonces, registerAction)
+    await II.issueNonce<system>(nonces, registerAction)
   };
 
   /// Step 3: verify the attribute bundle and register the caller as a
@@ -93,7 +92,7 @@ persistent actor Bagel {
   /// stored email (e.g. the user signed in to a different II anchor).
   public shared ({ caller }) func register() : async Result.Result<{ email : Text }, RegisterError> {
     let result = switch (II.verify<system>({
-      origins        = [rpOrigin];
+      origin         = rpOrigin;
       maxAgeNs       = null;
       nonces;
       action         = registerAction;
