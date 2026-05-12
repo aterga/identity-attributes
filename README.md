@@ -32,9 +32,7 @@ import Principal "mo:core/Principal";
 import Runtime   "mo:core/Runtime";
 
 persistent actor {
-  // State persists across upgrades; `ii` is rebuilt against it on each upgrade.
-  let          store = II.newStore();
-  transient let ii   = II.Verifier(store);
+  transient let ii = II.Verifier();
 
   // Called anonymously by the frontend before II sign-in.
   public shared func registerBegin() : async Blob {
@@ -64,8 +62,7 @@ persistent actor {
 ## API
 
 ```motoko
-II.newStore()                       : Store
-II.Verifier(store)                  : Verifier
+II.Verifier()                       : Verifier
 
 // Methods on the Verifier instance:
 ii.issueNonce<system>(action)       : async Blob

@@ -48,8 +48,7 @@ persistent actor Bagel {
   transient let allowedDomain : Text  = "dfinity.org";
   transient let registerAction : Text = "register";
 
-  let store      = II.newStore();
-  transient let ii = II.Verifier(store);
+  transient let ii = II.Verifier();
   // Principals known to belong to DFINITY employees, populated by
   // `register()` after the bundle has been fully verified. Subsequent
   // calls (join_round, reset) just look up against this map — no

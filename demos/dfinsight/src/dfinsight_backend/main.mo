@@ -63,8 +63,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // prevented by the II signature (any attacker who steals the nonce
   // ends up authenticating as themselves and the admin allowlist
   // check rejects them).
-  let store = II.newStore();
-  transient let ii = II.Verifier(store);
+  transient let ii = II.Verifier();
 
   var nextIssueId : Nat = 0;
 

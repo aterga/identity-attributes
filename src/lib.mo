@@ -10,10 +10,7 @@ import Result "mo:core/Result";
 /// import II "mo:identity-attributes";
 ///
 /// persistent actor {
-///   // State (persists across upgrades) + transient wrapper (rebuilt on
-///   // upgrade against the preserved state).
-///   let          store = II.newStore();
-///   transient let ii   = II.Verifier(store);
+///   transient let ii = II.Verifier();
 ///
 ///   public shared func begin() : async Blob {
 ///     await ii.issueNonce<system>("register")
@@ -37,7 +34,6 @@ module {
   public type Verified       = A.Verified;
   public type Attributes     = A.Attributes;
   public type Error          = V.Error;
-  public type Store          = C.Store;
 
   public type Config = {
     origin         : Text;
@@ -48,14 +44,12 @@ module {
 
   public let defaultMaxAgeNs = V.defaultMaxAgeNs;
 
-  /// Create a fresh nonce store. Holds this in a stable `let` of your
-  /// `persistent actor` so it survives upgrades.
-  public func newStore() : Store = C.empty();
+  /// Owns a nonce store internally. Declare as `transient let` in a
+  /// `persistent actor` — the store is intentionally throwaway across
+  /// upgrades (nonces are 5-min ephemeral; in-flight users just retry).
+  public class Verifier() {
+    let store : C.Store = C.empty();
 
-  /// Wraps a `Store` and exposes the issue/verify operations against it.
-  /// Hold this in a `transient let` of your `persistent actor`; it will
-  /// be rebuilt on upgrade against the preserved `Store`.
-  public class Verifier(store : Store) {
     public func issueNonce<system>(action : Text) : async Blob {
       await C.issue<system>(store, action)
     };

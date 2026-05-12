@@ -2,8 +2,7 @@ import II "../src/lib";
 import Debug "mo:core/Debug";
 
 do {
-  let store = II.newStore();
-  let ii    = II.Verifier(store);
+  let ii = II.Verifier();
   ignore ii.verify;
   ignore ii.issueNonce;
   ignore II.defaultMaxAgeNs;
