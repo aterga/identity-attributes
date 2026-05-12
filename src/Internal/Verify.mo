@@ -15,8 +15,10 @@ module {
     nonces         : Challenges.Store;
     action         : Text;
     // Provider-scoped reads. Set to the provider when the FE used a
-    // 1-click OpenID flow (e.g. `?#Google` for Google 1-click);
-    // `null` for the default Internet Identity passkey flow.
+    // 1-click OpenID flow (e.g. `?#Google` for Google 1-click) — the
+    // bundle's attribute keys are prefixed with that provider's scope.
+    // `null` for the default Internet Identity flow (passkey or
+    // user-picked OpenID provider) — keys arrive unscoped.
     openIdProvider : ?OpenIdProvider;
   };
 

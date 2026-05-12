@@ -46,8 +46,9 @@ persistent actor {
     let result = switch (ii.verify<system>({
       action         = "register";    // must match the issueNonce call
       // FE used a 1-click OpenID flow (Google here). Use ?#Apple,
-      // ?#Microsoft, ?#OpenId "<url>" to match other providers, or
-      // `null` for the default Internet Identity passkey flow.
+      // ?#Microsoft, ?#OpenId "<url>" for other 1-click providers,
+      // or `null` for the default Internet Identity flow (passkey
+      // or user-picked OpenID provider) — attributes arrive unscoped.
       openIdProvider = ?#Google;
     })) {
       case (#ok r)  r;
@@ -72,7 +73,8 @@ ii.verify<system>(config)           : Result<Verified, Error>
 type Config = {
   action         : Text;
   // Set to a provider when the FE used a 1-click OpenID flow
-  // (e.g. ?#Google). `null` for the default II passkey flow.
+  // (e.g. ?#Google); `null` for the default II flow (passkey or
+  // user-picked OpenID provider, attributes unscoped).
   openIdProvider : ?OpenIdProvider;
 };
 
