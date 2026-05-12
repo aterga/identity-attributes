@@ -32,7 +32,7 @@ import Principal "mo:core/Principal";
 import Runtime   "mo:core/Runtime";
 
 persistent actor {
-  transient let ii = II.Verifier();
+  transient let ii = II.Verifier("https://your-app.icp0.io");
 
   // Called anonymously by the frontend before II sign-in.
   public shared func registerBegin() : async Blob {
@@ -44,9 +44,11 @@ persistent actor {
     if (Principal.isAnonymous(caller)) Runtime.trap("anonymous");
 
     let result = switch (ii.verify<system>({
-      origin         = "https://your-app.icp0.io";
       action         = "register";    // must match the issueNonce call
-      openIdProvider = ?#Google;      // ?#Apple, ?#Microsoft, ?#OpenId url, or null
+      // FE used a 1-click OpenID flow (Google here). Use ?#Apple,
+      // ?#Microsoft, ?#OpenId "<url>" to match other providers, or
+      // `null` for the default Internet Identity passkey flow.
+      openIdProvider = ?#Google;
     })) {
       case (#ok r)  r;
       case (#err e) Runtime.trap(debug_show e);
@@ -68,9 +70,10 @@ ii.issueNonce<system>(action)       : async Blob
 ii.verify<system>(config)           : Result<Verified, Error>
 
 type Config = {
-  origin         : Text;
   action         : Text;
-  openIdProvider : ?OpenIdProvider; // null = passkey / unscoped keys
+  // Set to a provider when the FE used a 1-click OpenID flow
+  // (e.g. ?#Google). `null` for the default II passkey flow.
+  openIdProvider : ?OpenIdProvider;
 };
 
 type Verified = {

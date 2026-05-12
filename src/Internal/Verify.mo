@@ -14,6 +14,9 @@ module {
     origin         : Text;
     nonces         : Challenges.Store;
     action         : Text;
+    // Provider-scoped reads. Set to the provider when the FE used a
+    // 1-click OpenID flow (e.g. `?#Google` for Google 1-click);
+    // `null` for the default Internet Identity passkey flow.
     openIdProvider : ?OpenIdProvider;
   };
 

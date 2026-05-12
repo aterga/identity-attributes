@@ -63,7 +63,10 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // prevented by the II signature (any attacker who steals the nonce
   // ends up authenticating as themselves and the admin allowlist
   // check rejects them).
-  transient let ii = II.Verifier();
+  // `var` so `setRpOrigin` can rebuild the verifier when the
+  // controller changes the origin (typically a one-time post-deploy
+  // call — pending nonces, if any, are dropped, which is fine).
+  transient var ii = II.Verifier(rpOrigin);
 
   var nextIssueId : Nat = 0;
 
@@ -297,7 +300,6 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
     let result = switch (ii.verify<system>({
-      origin         = rpOrigin;
       action         = adminAction;
       openIdProvider = null;
     })) {
@@ -426,6 +428,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   public shared ({ caller }) func setRpOrigin(origin : Text) : async Result.Result<(), Text> {
     if (not Principal.isController(caller)) return #err("not a controller");
     rpOrigin := origin;
+    ii := II.Verifier(rpOrigin);
     #ok()
   };
 

@@ -10,7 +10,7 @@ import Result "mo:core/Result";
 /// import II "mo:identity-attributes";
 ///
 /// persistent actor {
-///   transient let ii = II.Verifier();
+///   transient let ii = II.Verifier("https://your-app.icp0.io");
 ///
 ///   public shared func begin() : async Blob {
 ///     await ii.issueNonce<system>("register")
@@ -18,7 +18,6 @@ import Result "mo:core/Result";
 ///
 ///   public shared func finish() : async ?Text {
 ///     switch (ii.verify<system>({
-///       origin         = "https://your-app.icp0.io";
 ///       action         = "register";
 ///       openIdProvider = ?#Google;
 ///     })) {
@@ -35,15 +34,14 @@ module {
   public type Error          = V.Error;
 
   public type Config = {
-    origin         : Text;
     action         : Text;
     openIdProvider : ?OpenIdProvider;
   };
 
-  /// Owns a nonce store internally. Declare as `transient let` in a
-  /// `persistent actor` — the store is intentionally throwaway across
-  /// upgrades (nonces are 5-min ephemeral; in-flight users just retry).
-  public class Verifier() {
+  /// Bound to a single frontend `origin`. Owns a nonce store internally
+  /// — declare as `transient let` in a `persistent actor`. Nonces are
+  /// throwaway across upgrades (5-min ephemeral; in-flight users retry).
+  public class Verifier(origin : Text) {
     let store : C.Store = C.empty();
 
     public func issueNonce<system>(action : Text) : async Blob {
@@ -52,7 +50,7 @@ module {
 
     public func verify<system>(c : Config) : Result.Result<Verified, Error> {
       V.verify<system>({
-        origin         = c.origin;
+        origin;
         nonces         = store;
         action         = c.action;
         openIdProvider = c.openIdProvider;
