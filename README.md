@@ -42,7 +42,7 @@ persistent actor {
   public shared ({ caller }) func authFinish() : async () {
     if (Principal.isAnonymous(caller)) return;
     let #ok result = verifier.verify<system>() else return;
-    // result.name and result.verified_email are safe to trust — act on them.
+    // e.g. update the caller's profile with result.name and result.verified_email.
   };
 };
 ```
