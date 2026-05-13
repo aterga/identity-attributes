@@ -33,13 +33,13 @@ import Principal "mo:core/Principal";
 persistent actor {
   transient let verifier = II.Verifier({ origin = "https://your-app.icp0.io" });
 
-  // Called anonymously by the frontend before II sign-in.
-  public shared func authBegin() : async Blob {
+  // Called anonymously by the frontend on page load, before II sign-in.
+  public shared func authStart() : async Blob {
     await verifier.nonce<system>()
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
-  public shared ({ caller }) func authEnd() : async () {
+  public shared ({ caller }) func authFinish() : async () {
     if (Principal.isAnonymous(caller)) return;
     let #ok result = verifier.verify<system>() else return;
     // e.g. update the caller's profile with result.name and result.verified_email.
