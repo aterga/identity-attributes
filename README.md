@@ -27,7 +27,8 @@ canisters:
 ## Usage
 
 ```motoko
-import II "mo:identity-attributes";
+import II        "mo:identity-attributes";
+import Principal "mo:core/Principal";
 
 persistent actor {
   transient let verifier = II.Verifier({ origin = "https://your-app.icp0.io" });
@@ -38,7 +39,8 @@ persistent actor {
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
-  public shared func authFinish() : async () {
+  public shared ({ caller }) func authFinish() : async () {
+    if (Principal.isAnonymous(caller)) return;
     let #ok result = verifier.verify<system>() else return;
     // result.name and result.verified_email are safe to trust — act on them.
   };
