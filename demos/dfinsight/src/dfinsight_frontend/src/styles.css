@@ -1,4 +1,8 @@
-/* ICP brand tokens — light editorial default. Dark opts in via data-theme="dark". */
+/* ICP brand tokens. Sans-serif (Inter) is the default for this
+   interactive app; serif (Newsreader) is reserved for the brand
+   wordmark and italic-accent flourishes. The design system reserves
+   the serif face for reading-content pages, which this app doesn't
+   have. */
 :root {
   --icp-bg: #faf9f5;
   --icp-bg-elev: #ffffff;
@@ -50,9 +54,9 @@ body,
 
 body {
   margin: 0;
-  font-family: var(--font-editorial);
+  font-family: var(--font-ui);
   font-weight: 400;
-  font-size: 17px;
+  font-size: 15px;
   line-height: 1.55;
   background: var(--icp-bg);
   color: var(--icp-fg);
@@ -66,36 +70,16 @@ body {
   flex-direction: column;
 }
 
-/* 24px ink hairline grid — applied as an overlay layer. */
-.icp-grid-paper {
-  position: relative;
-}
-
-.icp-grid-paper::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(to right, rgba(26, 26, 26, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(26, 26, 26, 0.04) 1px, transparent 1px);
-  background-size: 24px 24px;
-  opacity: 0.8;
-  z-index: 0;
-}
-
-[data-theme="dark"] .icp-grid-paper::before {
-  background-image:
-    linear-gradient(to right, rgba(240, 235, 224, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(240, 235, 224, 0.05) 1px, transparent 1px);
-}
-
 /* Site chrome ---------------------------------------------------------- */
 
 .site-header {
   border-bottom: 1px solid var(--icp-rule);
-  padding: 1rem 1.5rem;
+  padding: 0.875rem 1.5rem;
   background: var(--icp-bg);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: saturate(140%) blur(8px);
 }
 
 .site-header .wrap {
@@ -104,7 +88,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
 .brand {
@@ -125,6 +109,8 @@ body {
 }
 
 .brand .wordmark {
+  /* The wordmark is a brand mark, not page content — it keeps the
+     editorial serif as part of the visual identity. */
   font-family: var(--font-editorial);
   font-weight: 500;
   font-size: 18px;
@@ -134,6 +120,60 @@ body {
 .brand .wordmark em {
   font-style: italic;
   color: var(--icp-accent);
+}
+
+/* Primary nav (Board / Admin tabs) ------------------------------------ */
+
+.primary-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  margin-right: 0.5rem;
+  background: var(--icp-bg-sunk);
+  border: 1px solid var(--icp-rule);
+  border-radius: 9999px;
+  padding: 3px;
+}
+
+.primary-nav a {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--icp-fg-secondary);
+  text-decoration: none;
+  padding: 0.4rem 0.875rem;
+  border-radius: 9999px;
+  transition: background 120ms ease, color 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.primary-nav a:hover {
+  color: var(--icp-fg);
+}
+
+.primary-nav a.active {
+  background: var(--icp-bg-elev);
+  color: var(--icp-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="dark"] .primary-nav a.active {
+  box-shadow: 0 0 0 1px var(--icp-rule);
+}
+
+.primary-nav .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--icp-fg-muted);
+}
+
+.primary-nav a.active .dot {
+  background: var(--icp-accent);
 }
 
 .theme-toggle {
@@ -158,7 +198,7 @@ main {
   flex: 1;
   display: flex;
   justify-content: center;
-  padding: 3rem 1.5rem 4rem;
+  padding: 2.5rem 1.5rem 4rem;
   position: relative;
   z-index: 1;
 }
@@ -185,20 +225,6 @@ footer .meta {
   letter-spacing: 0.04em;
 }
 
-.admin-link {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--icp-fg-secondary);
-  text-decoration: none;
-}
-
-.admin-link:hover {
-  color: var(--icp-accent);
-}
-
 /* Card ----------------------------------------------------------------- */
 
 .card {
@@ -209,14 +235,6 @@ footer .meta {
   border-radius: 2px;
   padding: 2rem 2rem 2.25rem;
   position: relative;
-}
-
-.card .marker {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--icp-fg-secondary);
-  margin: 0 0 0.5rem;
-  letter-spacing: 0.04em;
 }
 
 .card .eyebrow {
@@ -230,31 +248,36 @@ footer .meta {
 }
 
 h1 {
-  font-family: var(--font-editorial);
-  font-weight: 380;
-  font-size: 2rem;
-  line-height: 1.1;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 1.75rem;
+  line-height: 1.15;
   letter-spacing: -0.015em;
   margin: 0 0 0.75rem;
 }
 
+/* Italic accent inside headings — Newsreader italic still works here as
+   a single decorative span, not as page-body type. */
 h1 em {
+  font-family: var(--font-editorial);
+  font-weight: 400;
   font-style: italic;
   color: var(--icp-accent);
+  letter-spacing: -0.01em;
 }
 
 h2 {
-  font-family: var(--font-editorial);
-  font-weight: 400;
-  font-size: 1.25rem;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 1.125rem;
   letter-spacing: -0.005em;
   margin: 0 0 0.5rem;
 }
 
 .lede {
-  font-family: var(--font-editorial);
+  font-family: var(--font-ui);
   font-weight: 400;
-  font-size: 1.0625rem;
+  font-size: 0.9375rem;
   line-height: 1.55;
   color: var(--icp-fg-secondary);
   margin: 0 0 1.5rem;
@@ -272,20 +295,24 @@ h2 {
 
 button {
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
   border-radius: 9999px;
   border: 1px solid var(--icp-rule);
   background: transparent;
   color: var(--icp-fg);
-  padding: 0.625rem 1.125rem;
+  padding: 0.55rem 1.05rem;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
@@ -317,7 +344,7 @@ button.ghost {
   background: transparent;
   color: var(--icp-fg-secondary);
   border: 1px solid var(--icp-rule);
-  padding: 0.5rem 0.875rem;
+  padding: 0.45rem 0.875rem;
 }
 
 button.ghost:hover:not(:disabled) {
@@ -350,15 +377,97 @@ button.voted {
   background: var(--icp-accent-dim);
 }
 
+/* Spinner inside buttons / inline UI ---------------------------------- */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.875em;
+  height: 0.875em;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -0.15em;
+}
+
+.spinner.sm {
+  width: 0.75em;
+  height: 0.75em;
+  border-width: 1.5px;
+}
+
+/* Skeleton placeholders ----------------------------------------------- */
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.skeleton {
+  background: var(--icp-rule);
+  border-radius: 2px;
+  animation: pulse 1.4s ease-in-out infinite;
+  display: block;
+}
+
+.skeleton.line {
+  height: 0.8em;
+}
+
+.skeleton.line + .skeleton.line {
+  margin-top: 0.55rem;
+}
+
+.skeleton.short {
+  width: 32%;
+}
+
+.skeleton.med {
+  width: 68%;
+}
+
+.skeleton-issue {
+  border: 1px solid var(--icp-rule);
+  border-top: 3px solid var(--icp-rule);
+  border-radius: 2px;
+  padding: 1rem 1.125rem 1.125rem;
+  background: var(--icp-bg-elev);
+}
+
+.skeleton-issue + .skeleton-issue {
+  margin-top: 1rem;
+}
+
+.skeleton-issue .row {
+  margin-top: 0.875rem;
+}
+
+.skeleton-issue .skeleton.pill {
+  width: 6.5rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+}
+
 /* Inputs --------------------------------------------------------------- */
 
 textarea,
 input[type="text"] {
   width: 100%;
-  font-family: var(--font-editorial);
-  font-size: 16px;
+  font-family: var(--font-ui);
+  font-size: 15px;
   line-height: 1.5;
-  padding: 0.75rem 0.875rem;
+  padding: 0.7rem 0.875rem;
   border-radius: 2px;
   border: 1px solid var(--icp-rule);
   background: var(--icp-bg-elev);
@@ -376,7 +485,6 @@ input[type="text"]:focus {
 textarea::placeholder,
 input[type="text"]::placeholder {
   color: var(--icp-fg-muted);
-  font-style: italic;
 }
 
 .post-form {
@@ -398,8 +506,8 @@ input[type="text"]::placeholder {
 }
 
 .error {
-  font-family: var(--font-editorial);
-  font-size: 0.95rem;
+  font-family: var(--font-ui);
+  font-size: 0.9rem;
   color: var(--icp-accent);
   white-space: pre-wrap;
   background: var(--icp-accent-dim);
@@ -438,9 +546,9 @@ pre.error {
 }
 
 .issue .body {
-  font-family: var(--font-editorial);
-  font-size: 1.0625rem;
-  line-height: 1.5;
+  font-family: var(--font-ui);
+  font-size: 0.9375rem;
+  line-height: 1.55;
   margin: 0 0 0.75rem;
   white-space: pre-wrap;
 }
@@ -451,10 +559,9 @@ pre.error {
   padding: 0.5rem 0.875rem;
   color: var(--icp-fg);
   background: var(--icp-bg-sunk);
-  font-family: var(--font-editorial);
-  font-style: italic;
-  font-size: 1rem;
-  line-height: 1.5;
+  font-family: var(--font-ui);
+  font-size: 0.9375rem;
+  line-height: 1.55;
 }
 
 .issue .response strong {
@@ -464,7 +571,6 @@ pre.error {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--icp-section-teal);
-  font-style: normal;
   display: block;
   margin-bottom: 0.25rem;
 }
@@ -499,8 +605,8 @@ pre.error {
 }
 
 .empty {
-  font-family: var(--font-editorial);
-  font-style: italic;
+  font-family: var(--font-ui);
+  font-style: normal;
   color: var(--icp-fg-muted);
   text-align: center;
   padding: 1.5rem;
@@ -511,19 +617,174 @@ pre.error {
   background: var(--icp-bg-sunk);
 }
 
-/* Disclosure details --------------------------------------------------- */
+/* Admin list ----------------------------------------------------------- */
 
 .admins,
 .info {
   margin-top: 1.5rem;
-  font-family: var(--font-editorial);
-  font-size: 0.95rem;
+  font-family: var(--font-ui);
+  font-size: 0.9rem;
   color: var(--icp-fg-secondary);
   border-top: 1px solid var(--icp-rule);
   padding-top: 1rem;
 }
 
-.admins summary,
+.admins {
+  margin-top: 1.5rem;
+}
+
+.admins-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.admins-header .label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--icp-fg-secondary);
+}
+
+.admins-header .count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--icp-fg-muted);
+  letter-spacing: 0.04em;
+}
+
+.admin-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--icp-rule);
+  border-radius: 2px;
+  background: var(--icp-bg-elev);
+  overflow: hidden;
+}
+
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.875rem;
+  border-bottom: 1px solid var(--icp-rule);
+}
+
+.admin-row:last-child {
+  border-bottom: none;
+}
+
+.admin-row .avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  background: var(--icp-accent-dim);
+  color: var(--icp-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.admin-row .name {
+  font-family: var(--font-ui);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--icp-fg);
+  line-height: 1.2;
+}
+
+.admin-row .email {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--icp-fg-muted);
+  letter-spacing: 0.02em;
+  margin-top: 0.15rem;
+  line-height: 1.2;
+  word-break: break-all;
+}
+
+.admin-row .meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.admin-row .me-pill {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: var(--icp-accent-dim);
+  color: var(--icp-accent);
+  border-radius: 9999px;
+  padding: 0.15rem 0.5rem;
+  margin-left: 0.4rem;
+  white-space: nowrap;
+}
+
+.admin-row .actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.admin-empty {
+  padding: 1rem;
+  text-align: center;
+  color: var(--icp-fg-muted);
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+}
+
+.admin-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.875rem;
+  border-bottom: 1px solid var(--icp-rule);
+}
+
+.admin-skeleton-row:last-child {
+  border-bottom: none;
+}
+
+.admin-skeleton-row .skeleton.avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.admin-skeleton-row .skeleton-stack {
+  flex: 1;
+}
+
+.add-admin {
+  margin-top: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.add-admin input[type="text"] {
+  flex: 1;
+}
+
+.info p {
+  margin: 0.5rem 0 0;
+  line-height: 1.55;
+}
+
 .info summary {
   font-family: var(--font-ui);
   font-size: 11px;
@@ -536,12 +797,10 @@ pre.error {
   list-style: none;
 }
 
-.admins summary::marker,
 .info summary::marker {
   display: none;
 }
 
-.admins summary::before,
 .info summary::before {
   content: "+ ";
   color: var(--icp-accent);
@@ -549,36 +808,12 @@ pre.error {
   font-weight: 500;
 }
 
-.admins[open] summary::before,
 .info[open] summary::before {
   content: "− ";
 }
 
-.admins summary:hover,
 .info summary:hover {
   color: var(--icp-fg);
-}
-
-.admins ul {
-  margin: 0.75rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.admins li {
-  font-family: var(--font-editorial);
-  color: var(--icp-fg-secondary);
-  padding: 0.375rem 0;
-  border-bottom: 1px solid var(--icp-rule);
-}
-
-.admins li:last-child {
-  border-bottom: none;
-}
-
-.info p {
-  margin: 0.5rem 0 0;
-  line-height: 1.55;
 }
 
 .info code {
@@ -622,7 +857,7 @@ a:hover {
 
 @media (max-width: 600px) {
   main {
-    padding: 1.5rem 1rem 2.5rem;
+    padding: 1.25rem 1rem 2.5rem;
   }
 
   .card {
@@ -630,6 +865,26 @@ a:hover {
   }
 
   h1 {
-    font-size: 1.625rem;
+    font-size: 1.5rem;
+  }
+
+  .site-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .site-header .wrap {
+    gap: 0.75rem;
+  }
+
+  .brand .eyebrow {
+    display: none;
+  }
+
+  .primary-nav a {
+    padding: 0.4rem 0.7rem;
+  }
+
+  .admin-row .email {
+    font-size: 10.5px;
   }
 }

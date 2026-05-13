@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 
 import { Home } from "./pages/Home";
 import { Issues } from "./pages/Issues";
@@ -25,6 +25,27 @@ function useTheme(): ["light" | "dark", () => void] {
   return [theme, () => setTheme((t) => (t === "dark" ? "light" : "dark"))];
 }
 
+function PrimaryNav() {
+  // /admin and /admin/panel both light up the Admin tab. The Home and
+  // Issues pages share the Board tab — both are the same product
+  // surface, just signed-out vs signed-in.
+  const { pathname } = useLocation();
+  const onAdmin = pathname.startsWith("/admin");
+
+  return (
+    <nav className="primary-nav" aria-label="Primary">
+      <Link to="/" className={onAdmin ? "" : "active"}>
+        <span className="dot" />
+        Board
+      </Link>
+      <Link to="/admin" className={onAdmin ? "active" : ""}>
+        <span className="dot" />
+        Admin
+      </Link>
+    </nav>
+  );
+}
+
 export function App() {
   const [theme, toggleTheme] = useTheme();
 
@@ -38,6 +59,7 @@ export function App() {
               Dfin<em>sight</em>
             </span>
           </Link>
+          <PrimaryNav />
           <button
             type="button"
             className="theme-toggle"
@@ -60,10 +82,7 @@ export function App() {
 
       <footer>
         <div className="wrap">
-          <span className="meta">§ DFINSIGHT · V2.17</span>
-          <Link to="/admin" className="admin-link">
-            Admin
-          </Link>
+          <span className="meta">DFINSIGHT · V2.17</span>
         </div>
       </footer>
     </div>

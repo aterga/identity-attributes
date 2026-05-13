@@ -25,6 +25,7 @@ export function Issues() {
   const navigate = useNavigate();
   const [session, setSession] = useState(sessionStore.get());
   const [issues, setIssues] = useState<IssueForUser[]>([]);
+  const [loading, setLoading] = useState(true);
   const [body, setBody] = useState("");
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
@@ -54,18 +55,23 @@ export function Issues() {
 
   async function refresh() {
     if (!session) return;
-    const [list, status] = await Promise.all([
-      session.backend.listIssuesForUser(),
-      session.backend.myPostStatus(),
-    ]);
-    setIssues(list);
-    setCanPost({
-      allowed: status.allowed,
-      nextAllowedAt:
-        status.nextAllowedNs.length === 1
-          ? new Date(Number(status.nextAllowedNs[0]) / 1_000_000)
-          : null,
-    });
+    setLoading(true);
+    try {
+      const [list, status] = await Promise.all([
+        session.backend.listIssuesForUser(),
+        session.backend.myPostStatus(),
+      ]);
+      setIssues(list);
+      setCanPost({
+        allowed: status.allowed,
+        nextAllowedAt:
+          status.nextAllowedNs.length === 1
+            ? new Date(Number(status.nextAllowedNs[0]) / 1_000_000)
+            : null,
+      });
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function onPost() {
@@ -105,11 +111,24 @@ export function Issues() {
     navigate("/");
   }
 
-  if (!session) return <p>Loading…</p>;
+  if (!session) {
+    return (
+      <section className="card" aria-busy="true">
+        <header className="row">
+          <h1>
+            Common matters of <em>interest</em>.
+          </h1>
+        </header>
+        <p className="lede">
+          <span className="spinner sm" aria-hidden="true" /> Restoring your
+          session…
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="card">
-      <p className="marker">§ 02</p>
       <header className="row">
         <h1>
           Common matters of <em>interest</em>.
@@ -145,19 +164,41 @@ export function Issues() {
             disabled={!canPost.allowed || posting || body.trim().length === 0}
             className="primary"
           >
+            {posting && <span className="spinner sm" aria-hidden="true" />}
             {posting ? "Posting…" : "Post"}
           </button>
         </div>
         {postError && <p className="error">{postError}</p>}
       </form>
 
-      <ul className="issues">
-        {issues.length === 0 && <li className="empty">Nothing yet.</li>}
-        {issues.map((i) => (
-          <IssueRow key={String(i.id)} issue={i} onUpvote={onUpvote} />
-        ))}
-      </ul>
+      {loading ? (
+        <IssuesSkeleton />
+      ) : (
+        <ul className="issues">
+          {issues.length === 0 && <li className="empty">Nothing yet.</li>}
+          {issues.map((i) => (
+            <IssueRow key={String(i.id)} issue={i} onUpvote={onUpvote} />
+          ))}
+        </ul>
+      )}
     </section>
+  );
+}
+
+function IssuesSkeleton() {
+  return (
+    <ul className="issues" aria-busy="true" aria-label="Loading issues">
+      {[0, 1, 2].map((i) => (
+        <li key={i} className="skeleton-issue">
+          <span className="skeleton line med" />
+          <span className="skeleton line short" />
+          <div className="row">
+            <span className="skeleton pill" />
+            <span className="skeleton line short" style={{ width: "4rem" }} />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 

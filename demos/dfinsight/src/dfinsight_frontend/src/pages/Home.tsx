@@ -25,7 +25,6 @@ export function Home() {
 
   return (
     <section className="card">
-      <p className="marker">§ 01</p>
       <p className="eyebrow">Anonymous · DFINITY</p>
       <h1>
         Common matters of <em>interest</em>.
@@ -36,6 +35,7 @@ export function Home() {
         the network.
       </p>
       <button onClick={onSignIn} disabled={busy} className="primary">
+        {busy && <span className="spinner sm" aria-hidden="true" />}
         {busy ? "Signing in…" : "Sign in anonymously"}
       </button>
       {error && <p className="error">{error}</p>}
