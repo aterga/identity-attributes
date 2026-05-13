@@ -108,11 +108,10 @@ The script does the two things a one-shot `icp deploy -e ic` can't:
 The on-chain canister ids are pinned in
 `.icp/data/mappings/ic.ids.json` — that file binds the canister names
 in `icp.yaml` to existing principals so `scripts/deploy.sh` redeploys
-to those canisters instead of minting fresh ones. Production frontend
-is `jjgb4-3aaaa-aaaao-qpuia-cai`; fill in the backend id (one-time)
-with `icp canister status dfinsight_backend -e ic` from a controller
-machine, then commit. Without this mapping the script silently
-deploys to a brand-new pair.
+to those canisters instead of minting fresh ones. The production pair
+is `dfinsight_backend = rybmt-uaaaa-aaaab-agt6q-cai`,
+`dfinsight_frontend = jjgb4-3aaaa-aaaao-qpuia-cai`. Without this
+mapping the script silently deploys to a brand-new pair.
 
 `trusted_attribute_signers` (II's production principal
 `rdmx6-jaaaa-aaaaa-aaadq-cai`) is wired automatically via
