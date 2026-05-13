@@ -17,8 +17,8 @@ module {
 
   /// Candid-decode an ICRC-3 `Value` blob. Returns `null` if the bytes don't
   /// match the expected type.
-  public func decode(b : Blob) : ?Value {
-    let v : ?Value = from_candid(b);
-    v
+  public func decode(blob : Blob) : ?Value {
+    let decoded : ?Value = from_candid(blob);
+    decoded
   };
 };

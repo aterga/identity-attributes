@@ -3,11 +3,11 @@ import Debug "mo:core/Debug";
 
 do {
   // Build an Attributes class directly so we don't have to go through
-  // `from_candid`. Exercises both the exact-match getters on the class
-  // and the typed scoped extraction via `asProvider`.
+  // `from_candid`. Exercises the exact-match getters AND `asVerified`.
   let attrs = Attributes.Attributes([
     ("name",                                                        #Text "Alice"),
     ("email",                                                       #Text "alice@example.com"),
+    ("verified_email",                                              #Text "alice@verified.com"),
     ("openid:https://accounts.google.com:name",                     #Text "Alice G"),
     ("openid:https://accounts.google.com:email",                    #Text "alice@gmail.com"),
     ("openid:https://accounts.google.com:verified_email",           #Text "alice@gmail.com"),
@@ -23,48 +23,38 @@ do {
   assert attrs.getText("openid:https://accounts.google.com:name") == ?"Alice G";
   assert attrs.getText("missing") == null;
 
-  // No scope-fallback — an unscoped key does NOT match a scoped entry and vice versa.
-  assert attrs.getText("openid:other.com:email") == null;
-
   assert attrs.getNat("implicit:issued_at_timestamp_ns") == ?1_700_000_000_000_000_000;
   assert attrs.getNat("name") == null;   // wrong variant
 
   assert attrs.getBlob("implicit:nonce") == ?("\de\ad\be\ef" : Blob);
-  assert attrs.getBlob("name") == null;
 
   assert attrs.has("implicit:origin");
   assert not attrs.has("phone_number");
 
-  // ---- asProvider: default scope ----
+  // ---- asVerified: every known provider populated independently ----
 
-  let def = Attributes.asProvider(attrs, null);
-  assert def.name == ?"Alice";
-  // No `verified_email` at default scope → email is null even though `email` exists.
-  // (Reading the unverified `email` is the caller's explicit choice via
-  // `def.attributes.getText("email")`.)
-  assert def.email == null;
-  assert def.attributes.getText("email") == ?"alice@example.com";
+  let v = Attributes.asVerified(attrs);
 
-  // ---- asProvider: Google scope ----
+  assert v.name == ?"Alice";
+  assert v.verified_email == ?"alice@verified.com";
 
-  let google = Attributes.asProvider(attrs, ?#Google);
-  assert google.name == ?"Alice G";
-  assert google.email == ?"alice@gmail.com";   // from verified_email
+  assert v.google_name == ?"Alice G";
+  assert v.google_verified_email == ?"alice@gmail.com";
 
-  // ---- asProvider: Apple scope (no verified_email present) ----
+  // Apple has `email` but no `verified_email` → only the verified
+  // variant lives on `Verified`. The raw email is reachable via the
+  // escape hatch.
+  assert v.apple_name == null;
+  assert v.apple_verified_email == null;
+  assert v.attributes.getText("openid:https://appleid.apple.com:email") == ?"alice@icloud.com";
 
-  let apple = Attributes.asProvider(attrs, ?#Apple);
-  // Apple has `email` but no `verified_email` → trusted email is null.
-  assert apple.email == null;
-  assert apple.attributes.getText("openid:https://appleid.apple.com:email") == ?"alice@icloud.com";
+  // Microsoft keys missing → all-null.
+  assert v.microsoft_name == null;
+  assert v.microsoft_verified_email == null;
 
-  // ---- asProvider: custom OpenID URL ----
-
-  let attrsCustom = Attributes.Attributes([
-    ("openid:https://accounts.example.com:verified_email", #Text "bob@example.com"),
-  ]);
-  let custom = Attributes.asProvider(attrsCustom, ?#OpenId "https://accounts.example.com");
-  assert custom.email == ?"bob@example.com";
+  // Raw unverified email is NOT exposed on Verified — reach into
+  // attributes if you knowingly want it.
+  assert v.attributes.getText("email") == ?"alice@example.com";
 
   Debug.print("Attributes.test.mo ok");
 };

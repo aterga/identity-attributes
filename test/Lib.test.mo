@@ -2,18 +2,13 @@ import II "../src/lib";
 import Debug "mo:core/Debug";
 
 do {
-  let ii = II.Verifier("https://example.com");
-  ignore ii.verify;
-  ignore ii.issueNonce;
+  let verifier = II.Verifier({ origin = "https://example.com" });
 
-  let _p : II.OpenIdProvider = #Google;
-  ignore _p;
+  ignore verifier.verify;
+  ignore verifier.nonce;
 
-  let _c : II.Config = {
-    action         = "test";
-    openIdProvider = null;
-  };
-  ignore _c;
+  let _e : II.Error = #NoAttributes;
+  ignore _e;
 
   Debug.print("Lib.test.mo ok");
 };

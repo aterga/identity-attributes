@@ -37,10 +37,6 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // `mo:identity-attributes` on every admin verify.
   var rpOrigin : Text = "http://localhost:5173";
 
-  // Action label distinguishing admin-session nonces from any other
-  // flow that might share this canister later.
-  let adminAction : Text = "establishAdminSession";
-
   // After a successful verify we keep the principal marked as "trusted
   // admin" for this long — so a single sign-in covers a normal admin
   // session (list, delete, respond, refresh) without forcing a new II
@@ -55,18 +51,17 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // -------------------------------------------------------------- state --
 
-  // Holds the canister-global nonce store internally. Issued and
-  // consumed under the `adminAction` tag; the FE pre-fetches a nonce
-  // anonymously on the admin page mount and the SSO-authenticated
-  // caller redeems it during `establishAdminSession`. Cross-flow
-  // replay is prevented by the action tag; cross-user replay is
-  // prevented by the II signature (any attacker who steals the nonce
-  // ends up authenticating as themselves and the admin allowlist
-  // check rejects them).
+  // Holds the canister-global nonce store internally. The FE
+  // pre-fetches a nonce anonymously on the admin page mount and the
+  // SSO-authenticated caller redeems it in `establishAdminSession`.
+  // Cross-user replay is prevented by the II signature (any attacker
+  // who steals the nonce ends up authenticating as themselves, and
+  // the admin allowlist rejects them).
+  //
   // `var` so `setRpOrigin` can rebuild the verifier when the
   // controller changes the origin (typically a one-time post-deploy
   // call — pending nonces, if any, are dropped, which is fine).
-  transient var ii = II.Verifier(rpOrigin);
+  transient var verifier = II.Verifier({ origin = rpOrigin });
 
   var nextIssueId : Nat = 0;
 
@@ -167,7 +162,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   /// one on every admin-page load (anonymously, before the SSO popup)
   /// so the click handler stays synchronous.
   public shared func generate_nonce() : async Blob {
-    await ii.issueNonce<system>(adminAction);
+    await verifier.nonce<system>();
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
@@ -299,10 +294,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // the typed slot empty and read the name via the attributes escape
   // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
-    let result = switch (ii.verify<system>({
-      action         = adminAction;
-      openIdProvider = null;
-    })) {
+    let result = switch (verifier.verify<system>()) {
       case (#err e) return #err(#Verify e);
       case (#ok r)  r;
     };
@@ -428,7 +420,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   public shared ({ caller }) func setRpOrigin(origin : Text) : async Result.Result<(), Text> {
     if (not Principal.isController(caller)) return #err("not a controller");
     rpOrigin := origin;
-    ii := II.Verifier(rpOrigin);
+    verifier := II.Verifier({ origin = rpOrigin });
     #ok()
   };
 

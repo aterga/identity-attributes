@@ -44,11 +44,10 @@ persistent actor Bagel {
   // values are preserved across upgrades. `transient` re-evaluates the
   // right-hand side on every upgrade so source-level changes actually
   // take effect.
-  transient let rpOrigin : Text       = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
-  transient let allowedDomain : Text  = "dfinity.org";
-  transient let registerAction : Text = "register";
+  transient let rpOrigin : Text      = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
+  transient let allowedDomain : Text = "dfinity.org";
 
-  transient let ii = II.Verifier(rpOrigin);
+  transient let verifier = II.Verifier({ origin = rpOrigin });
   // Principals known to belong to DFINITY employees, populated by
   // `register()` after the bundle has been fully verified. Subsequent
   // calls (join_round, reset) just look up against this map — no
@@ -77,7 +76,7 @@ persistent actor Bagel {
   /// to call anonymously — the frontend fetches this on page load,
   /// before the user signs in with II.
   public func generate_nonce() : async Blob {
-    await ii.issueNonce<system>(registerAction)
+    await verifier.nonce<system>()
   };
 
   /// Step 3: verify the attribute bundle and register the caller as a
@@ -91,14 +90,10 @@ persistent actor Bagel {
   /// Idempotent: re-registering with a fresh bundle just overwrites the
   /// stored email (e.g. the user signed in to a different II anchor).
   public shared ({ caller }) func register() : async Result.Result<{ email : Text }, RegisterError> {
-    let result = switch (ii.verify<system>({
-      action         = registerAction;
-      // The frontend requests the custom-scoped `sso:dfinity.org:email`
-      // key, which is outside the lib's typed `OpenIdProvider` surface.
-      // Leave the typed slot empty and read the email via the escape
-      // hatch below.
-      openIdProvider = null;
-    })) {
+    // The frontend requests the custom-scoped `sso:dfinity.org:email`
+    // key — outside the typed `Verified` surface, so read it via the
+    // escape hatch below.
+    let result = switch (verifier.verify<system>()) {
       case (#err e) { return #err(#Verify e) };
       case (#ok r)  r;
     };
