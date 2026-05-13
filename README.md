@@ -33,7 +33,7 @@ import Principal "mo:core/Principal";
 persistent actor {
   transient let verifier = II.Verifier({ origin = "https://your-app.icp0.io" });
 
-  // Called anonymously by the frontend on page load, before II sign-in.
+  // Pre-fetched anonymously by the frontend before II sign-in.
   public shared func authStart() : async Blob {
     await verifier.nonce<system>()
   };
