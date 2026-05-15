@@ -38,15 +38,15 @@ persistent actor {
     nonces;
   });
 
-  // Pre-fetched anonymously by the frontend before II sign-in.
+  // Pre-fetched anonymously by the frontend before Internet Identity sign-in.
   public shared func authStart() : async Blob {
     await identityAttributesProvider.createNonce<system>()
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared func authFinish() : async () {
-    let #ok verifiedAttributes = identityAttributesProvider.getVerifiedIdentityAttributes<system>() else return;
-    // e.g. update the caller's profile with verifiedAttributes.name and verifiedAttributes.verified_email.
+    let #ok verifiedIdentityAttributes = identityAttributesProvider.getVerifiedIdentityAttributes<system>() else return;
+    // For example, update the caller's profile with verifiedIdentityAttributes.name and verifiedIdentityAttributes.verified_email.
   };
 };
 ```
@@ -101,7 +101,7 @@ implicit fields, enterprise SSO (`sso:<domain>:*`), the raw `email`.
 
 ## Demos
 
-- [`demos/bagel/`](demos/bagel/) — pair-for-coffee canister, gated by II attributes.
+- [`demos/bagel/`](demos/bagel/) — pair-for-coffee canister, gated by Internet Identity attributes.
 - [`demos/dfinsight/`](demos/dfinsight/) — feedback board with an attribute-gated admin role.
 
 ## License

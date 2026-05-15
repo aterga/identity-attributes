@@ -8,8 +8,8 @@ import Value "./Value";
 ///
 /// `VerifiedIdentityAttributes` is the typed result of `Verify.verify`: every known
 /// provider's `name` and `verified_email` surfaced as optional fields,
-/// plus the underlying `Attributes` for any custom-scoped keys (e.g.
-/// enterprise `sso:<domain>:*`) or the raw unverified `email`.
+/// plus the underlying `Attributes` for any custom-scoped keys (for
+/// example, enterprise `sso:<domain>:*`) or the raw unverified `email`.
 module {
 
   type Value = Value.Value;
@@ -57,20 +57,20 @@ module {
   /// Each scope's `name` and `verified_email` come from the bundle's
   /// matching key (default scope = unscoped key; provider scopes =
   /// `openid:<provider-url>:<key>`). Fields are `null` when the FE
-  /// didn't request that scope's keys or II didn't surface them.
+  /// didn't request that scope's keys or Internet Identity didn't surface them.
   ///
   /// **No raw `email` field by design.** The unverified `email` key
-  /// is user-supplied — II doesn't check it — so exposing it
+  /// is user-supplied — Internet Identity doesn't check it — so exposing it
   /// alongside the verified variants would make the unsafe choice as
   /// easy as the safe one. If you genuinely need it (mailing-list
   /// signup, contact display, never gating access), reach in
   /// explicitly via `attributes.getText("email")`.
   ///
   /// For Microsoft, the `{tid}` in the URL is *literal* — that's what
-  /// II actually emits, not a placeholder for a tenant GUID.
+  /// Internet Identity actually emits, not a placeholder for a tenant GUID.
   ///
   /// For enterprise SSO keys outside the four named providers, read
-  /// directly from `attributes`, e.g.
+  /// directly from `attributes` — for example,
   /// `attributes.getText("sso:dfinity.org:verified_email")`.
   public type VerifiedIdentityAttributes = {
     name                     : ?Text;

@@ -28,7 +28,7 @@ import Result "mo:core/Result";
 /// ## Why we don't key by `Principal`
 ///
 /// In the canonical flow the begin endpoint is called anonymously
-/// (before II sign-in) and the finish endpoint is called authenticated,
+/// (before Internet Identity sign-in) and the finish endpoint is called authenticated,
 /// so the two callers differ. Cross-user replay is handled by the
 /// bundle signature itself: the IC binds the bundle to the caller of
 /// the finish endpoint, so an attacker who steals a nonce only manages

@@ -31,7 +31,7 @@ module {
     /// against a signer this canister doesn't trust.
     #NoAttributes;
     /// The bundle is trusted-signed but its payload isn't a well-formed
-    /// ICRC-3 `Value::Map`. Treat as a protocol mismatch — either II
+    /// ICRC-3 `Value::Map`. Treat as a protocol mismatch — either Internet Identity
     /// has rev'd its wire format and this library is out of date, or
     /// someone is hand-crafting garbage payloads.
     #MalformedCandid;
