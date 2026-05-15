@@ -1,4 +1,4 @@
-import II         "mo:identity-attributes";
+import { IdentityAttributesProvider; type IdentityAttributesError } "mo:identity-attributes";
 import Map        "mo:core/Map";
 import Principal  "mo:core/Principal";
 import Text       "mo:core/Text";
@@ -50,7 +50,7 @@ persistent actor Bagel {
 
   let nonces = List.empty<Blob>();
 
-  transient let provider = II.IdentityAttributesProvider({
+  transient let provider = IdentityAttributesProvider({
     origin = rpOrigin;
     nonces;
   });
@@ -68,7 +68,7 @@ persistent actor Bagel {
   };
 
   public type RegisterError = {
-    #Verify       : II.Error;
+    #Verify       : IdentityAttributesError;
     #NoEmail;
     #WrongDomain  : { email : Text };
   };

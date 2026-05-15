@@ -1,5 +1,4 @@
-import { IdentityAttributesProvider } "../src/lib";
-import IIType "../src/lib";
+import { IdentityAttributesProvider; type IdentityAttributesError } "../src/lib";
 import List "mo:core/List";
 import Debug "mo:core/Debug";
 
@@ -13,7 +12,7 @@ do {
   ignore identityAttributesProvider.createNonce;
   ignore identityAttributesProvider.getVerifiedAttributes;
 
-  let _e : IIType.Error = #NoAttributes;
+  let _e : IdentityAttributesError = #NoAttributes;
   ignore _e;
 
   Debug.print("Lib.test.mo ok");

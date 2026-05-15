@@ -1,4 +1,4 @@
-import II         "mo:identity-attributes";
+import { IdentityAttributesProvider; type IdentityAttributesError } "mo:identity-attributes";
 
 import Map        "mo:core/Map";
 import Principal  "mo:core/Principal";
@@ -61,7 +61,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   //
   let nonces = List.empty<Blob>();
 
-  transient var provider = II.IdentityAttributesProvider({
+  transient var provider = IdentityAttributesProvider({
     origin = rpOrigin;
     nonces;
   });
@@ -139,7 +139,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   };
 
   public type AdminError = {
-    #Verify     : II.Error;
+    #Verify     : IdentityAttributesError;
     #NoName;
     #NotAdmin   : { name : Text; admins : [Text] };
     #NotFound;
@@ -423,7 +423,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   public shared ({ caller }) func setRpOrigin(origin : Text) : async Result.Result<(), Text> {
     if (not Principal.isController(caller)) return #err("not a controller");
     rpOrigin := origin;
-    provider := II.IdentityAttributesProvider({ origin = rpOrigin; nonces });
+    provider := IdentityAttributesProvider({ origin = rpOrigin; nonces });
     #ok()
   };
 

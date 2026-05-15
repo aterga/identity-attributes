@@ -19,7 +19,7 @@ module {
   public type Nonces             = Challenges.Store;
   public type VerifiedAttributes = Attributes.VerifiedAttributes;
   public type Attributes         = Attributes.Attributes;
-  public type Error              = Verify.Error;
+  public type IdentityAttributesError = Verify.Error;
 
   public type Config = {
 
@@ -60,7 +60,7 @@ module {
     ///
     /// On `#err`, nothing about the bundle is trustworthy.
     public func getVerifiedAttributes<system>()
-      : Result.Result<VerifiedAttributes, Error>
+      : Result.Result<VerifiedAttributes, IdentityAttributesError>
     {
       Verify.verify<system>({ origin = config.origin; store = config.nonces })
     };

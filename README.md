@@ -58,7 +58,7 @@ IdentityAttributesProvider(config)       : IdentityAttributesProvider
 
 // Methods on the IdentityAttributesProvider instance:
 identityAttributesProvider.createNonce<system>()           : async Blob
-identityAttributesProvider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, Error>
+identityAttributesProvider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, IdentityAttributesError>
 
 type Nonces = List.List<Blob>;
 
@@ -79,7 +79,7 @@ type VerifiedAttributes = {
   attributes               : Attributes;
 };
 
-type Error = {
+type IdentityAttributesError = {
   #NoAttributes;
   #MalformedCandid;
   #MissingField   : Text;
