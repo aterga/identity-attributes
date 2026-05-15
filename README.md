@@ -54,10 +54,10 @@ persistent actor {
 ## API
 
 ```motoko
-IdentityAttributesProvider(config)       : IdentityAttributesProvider
+IdentityAttributesProvider(config)                                 : IdentityAttributesProvider
 
 // Methods on the IdentityAttributesProvider instance:
-identityAttributesProvider.createNonce<system>()           : async Blob
+identityAttributesProvider.createNonce<system>()                   : async Blob
 identityAttributesProvider.getVerifiedIdentityAttributes<system>() : Result<VerifiedIdentityAttributes, IdentityAttributesError>
 
 type Nonces = List.List<Blob>;
@@ -76,7 +76,7 @@ type VerifiedIdentityAttributes = {
   apple_verified_email     : ?Text;
   microsoft_name           : ?Text;
   microsoft_verified_email : ?Text;
-  attributes               : Attributes;
+  attributes               : IdentityAttributes;
 };
 
 type IdentityAttributesError = {
@@ -89,7 +89,7 @@ type IdentityAttributesError = {
 };
 ```
 
-`verifiedAttributes.attributes` has `getText(key)`, `getNat(key)`,
+`verifiedIdentityAttributes.attributes` has `getText(key)`, `getNat(key)`,
 `getBlob(key)`, `has(key)` for keys outside the typed surface —
 implicit fields, enterprise SSO (`sso:<domain>:*`), the raw `email`.
 
