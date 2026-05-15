@@ -1,17 +1,13 @@
-import II "../src/lib";
+import IdentityAttributesProvider "../src/lib";
 import Debug "mo:core/Debug";
 
 do {
-  let nonces = II.emptyNonces();
-  let provider = II.IdentityAttributesProvider({
-    origin = "https://example.com";
-    nonces;
-  });
+  let nonces = IdentityAttributesProvider.emptyNonces();
+  ignore nonces;
+  ignore IdentityAttributesProvider.createNonce;
+  ignore IdentityAttributesProvider.getVerifiedAttributes;
 
-  ignore provider.createNonce;
-  ignore provider.getVerifiedAttributes;
-
-  let _e : II.Error = #NoAttributes;
+  let _e : IdentityAttributesProvider.Error = #NoAttributes;
   ignore _e;
 
   Debug.print("Lib.test.mo ok");

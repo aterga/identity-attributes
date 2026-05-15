@@ -27,29 +27,26 @@ canisters:
 ## Usage
 
 ```motoko
-import { IdentityAttributesProvider; emptyNonces } "mo:identity-attributes";
+import IdentityAttributesProvider "mo:identity-attributes";
 import Principal "mo:core/Principal";
 
 persistent actor {
-  // `let` in a `persistent actor` is stable by default — the nonce
-  // store survives upgrades, so users mid-flow don't have to retry.
-  let nonces = emptyNonces();
-
-  // Rebuilt on every upgrade and re-bound to the same `nonces`.
-  transient let provider = IdentityAttributesProvider({
-    origin = "https://your-app.icp0.io";
-    nonces;
-  });
+  // `transient` clears nonces on upgrade — users mid-flow retry. Use
+  // plain `let` to preserve nonces across upgrades instead.
+  transient let nonces = IdentityAttributesProvider.emptyNonces();
 
   // Pre-fetched anonymously by the frontend before II sign-in.
   public shared func authStart() : async Blob {
-    await provider.createNonce<system>()
+    await IdentityAttributesProvider.createNonce<system>(nonces)
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared ({ caller }) func authFinish() : async () {
     if (Principal.isAnonymous(caller)) return;
-    let #ok verifiedAttributes = provider.getVerifiedAttributes<system>() else return;
+    let #ok verifiedAttributes = IdentityAttributesProvider.getVerifiedAttributes<system>({
+      origin = "https://your-app.icp0.io";
+      nonces;
+    }) else return;
     // e.g. update the caller's profile with verifiedAttributes.name and verifiedAttributes.verified_email.
   };
 };
@@ -58,12 +55,9 @@ persistent actor {
 ## API
 
 ```motoko
-emptyNonces()                            : Nonces
-IdentityAttributesProvider(config)       : IdentityAttributesProvider
-
-// Methods on the provider instance:
-provider.createNonce<system>()           : async Blob
-provider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, Error>
+emptyNonces()                          : Nonces
+createNonce<system>(nonces)            : async Blob
+getVerifiedAttributes<system>(config)  : Result<VerifiedAttributes, Error>
 
 type Config = {
   origin : Text;
@@ -89,7 +83,6 @@ type Error = {
   #OriginMismatch : { expected : Text; got : Text };
   #Stale          : { ageNs : Nat };
   #UnknownNonce;
-  #NonceExpired;
 };
 ```
 

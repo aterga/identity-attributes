@@ -45,16 +45,13 @@ module {
     /// window. The FE should fetch a fresh nonce and try again.
     #Stale : { ageNs : Nat };
     /// The bundle's nonce was never issued by this canister, or was
-    /// issued and already consumed.
+    /// issued and already consumed. Stale-but-stored nonces are caught
+    /// by `#Stale` (the bundle freshness check) before we get here.
     #UnknownNonce;
-    /// The nonce was issued by this canister but redeemed too late.
-    /// Same recovery as `#Stale`: refetch and retry.
-    #NonceExpired;
   };
 
-  /// Five minutes in nanoseconds. Applied to both the
-  /// `implicit:issued_at_timestamp_ns` freshness check and the
-  /// canister-side nonce-age check.
+  /// Five minutes in nanoseconds. Applied to the bundle's
+  /// `implicit:issued_at_timestamp_ns` freshness check.
   let maxAgeNs : Nat = 300_000_000_000;
 
   public func verify<system>(config : Config) : Result.Result<VerifiedAttributes, Error> {
@@ -75,9 +72,8 @@ module {
     };
 
     let ?bundleNonce = attrs.getBlob("implicit:nonce") else return #err(#MissingField "implicit:nonce");
-    switch (Challenges.consume(config.store, bundleNonce, nowNs, maxAgeNs)) {
+    switch (Challenges.consume(config.store, bundleNonce)) {
       case (#err(#UnknownNonce)) return #err(#UnknownNonce);
-      case (#err(#Expired))      return #err(#NonceExpired);
       case (#ok) {};
     };
 

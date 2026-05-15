@@ -1,10 +1,8 @@
 import Random "mo:core/Random";
-import Time   "mo:core/Time";
-import Int    "mo:core/Int";
 import Array  "mo:core/Array";
 import Result "mo:core/Result";
 
-/// Single-use canister-issued nonces.
+/// Single-use canister-issued nonces. A flat list of blobs.
 ///
 /// ## Why nonces are canister-issued
 ///
@@ -14,12 +12,20 @@ import Result "mo:core/Result";
 /// distinguish a fresh user flow from an attacker replaying or
 /// laundering an old bundle. Mint here, store here, consume here.
 ///
+/// ## No per-entry expiry
+///
+/// We don't track when each nonce was minted — the bundle's own
+/// `implicit:issued_at_timestamp_ns` field gives the verifier a
+/// 5-minute freshness window, so stale nonces can't be redeemed even
+/// if they're still sitting in the store. The cap (`maxTotal`) plus
+/// FIFO eviction is all the bookkeeping we need.
+///
 /// ## Memory bounds
 ///
-/// Flat FIFO of `Entry`, capped at `maxTotal`. On overflow the oldest
-/// entry is evicted — in legitimate use that's an abandoned flow
-/// (someone got a nonce and walked away). Successful `consume` removes
-/// the matched entry, so steady-state size tracks abandonment rate.
+/// Capped at `maxTotal` entries. On overflow the oldest is evicted —
+/// in legitimate use that's an abandoned flow. Successful `consume`
+/// removes the matched entry. With 4096 entries × 32 bytes ≈ 128 KB
+/// worst case.
 ///
 /// ## Why we don't key by `Principal`
 ///
@@ -34,48 +40,29 @@ module {
   /// Upper bound on store size. FIFO eviction once we hit this.
   public let maxTotal : Nat = 4096;
 
-  type Entry = { nonce : Blob; createdAtNs : Nat };
+  public type Store = { var entries : [Blob] };
 
-  public type Store = { var entries : [Entry] };
-
-  public type ConsumeError = { #UnknownNonce; #Expired };
+  public type ConsumeError = { #UnknownNonce };
 
   public func empty() : Store { { var entries = [] } };
 
   /// Mint a fresh 32-byte random nonce, remember it, return it.
   public func issue<system>(store : Store) : async Blob {
     let nonce = await Random.blob();
-    let entry = { nonce; createdAtNs = Int.abs(Time.now()) };
     let trimmed = if (store.entries.size() >= maxTotal) {
-      Array.sliceToArray<Entry>(store.entries, 1, store.entries.size())
+      Array.sliceToArray<Blob>(store.entries, 1, store.entries.size())
     } else store.entries;
-    store.entries := Array.concat(trimmed, [entry]);
+    store.entries := Array.concat(trimmed, [nonce]);
     nonce
   };
 
-  /// Find and remove the entry matching `nonce`. Returns `#Expired`
-  /// when a match was found but was created more than `maxAgeNs` ago —
-  /// the entry is removed in that case too, so a second probe for the
-  /// same expired nonce returns `#UnknownNonce` (no oracle).
-  public func consume(
-    store    : Store,
-    nonce    : Blob,
-    nowNs    : Nat,
-    maxAgeNs : Nat,
-  ) : Result.Result<(), ConsumeError> {
-    var matchedAtNs : ?Nat = null;
-    store.entries := Array.filter<Entry>(store.entries, func entry {
-      if (matchedAtNs == null and entry.nonce == nonce) {
-        matchedAtNs := ?entry.createdAtNs; false
-      } else true
+  /// Find and remove the entry matching `nonce`.
+  public func consume(store : Store, nonce : Blob) : Result.Result<(), ConsumeError> {
+    var found = false;
+    store.entries := Array.filter<Blob>(store.entries, func entry {
+      if (not found and entry == nonce) { found := true; false } else true
     });
-    switch matchedAtNs {
-      case null #err(#UnknownNonce);
-      case (?createdAt) {
-        let age = if (nowNs >= createdAt) (nowNs - createdAt : Nat) else 0;
-        if (age > maxAgeNs) #err(#Expired) else #ok
-      };
-    };
+    if (found) #ok else #err(#UnknownNonce)
   };
 
 };
