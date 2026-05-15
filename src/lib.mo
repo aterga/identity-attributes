@@ -6,20 +6,22 @@ import Result     "mo:core/Result";
 /// Verify Internet Identity attribute bundles in relying-party canisters.
 /// Pairs with `@icp-sdk/auth` v7's `requestAttributes` / `AttributesIdentity`.
 ///
-/// One `Verifier` per canister. `nonce` mints a single-use nonce;
-/// `verify` walks the bundle's invariants (origin, nonce, freshness)
-/// and returns a `Verified` record with every known provider's `name`
-/// and `verified_email` surfaced as optional fields — pick the ones you
-/// asked the FE to request.
-///
-/// The signer check (is this bundle really from II?) happens one level
-/// down in `mo:core/CallerAttributes`, which reads your
-/// `trusted_attribute_signers` env var. See README.md for setup.
+/// The provider owns no state of its own — nonces live in a `Nonces`
+/// value you declare in your actor and pass in by reference. In a
+/// `persistent actor` that value is stable by default, so in-flight
+/// users survive upgrades. See README for setup.
 module {
 
-  public type Verified   = Attributes.Verified;
-  public type Attributes = Attributes.Attributes;
-  public type Error      = Verify.Error;
+  public type Nonces             = Challenges.Store;
+  public type VerifiedAttributes = Attributes.VerifiedAttributes;
+  public type Attributes         = Attributes.Attributes;
+  public type Error              = Verify.Error;
+
+  /// A fresh, empty nonce store. Declare once in your actor with
+  /// `let nonces = emptyNonces();` and pass to
+  /// `IdentityAttributesProvider`. `let` in a `persistent actor` is
+  /// stable by default, so the store survives upgrades.
+  public func emptyNonces() : Nonces = Challenges.empty();
 
   public type Config = {
 
@@ -27,25 +29,26 @@ module {
     /// Mismatch → `#OriginMismatch`. Typically the exact `.icp0.io` URL
     /// of your asset canister (no trailing slash). Internet Identity
     /// rewrites `.ic0.app` loads to the canonical `.icp0.io` form before
-    /// signing, so list the `.icp0.io` form here even if users arrive on
-    /// `.ic0.app`.
+    /// signing, so list the `.icp0.io` form here even if users arrive
+    /// on `.ic0.app`.
     origin : Text;
+
+    /// The nonce store. Passed by reference — the provider mutates it
+    /// in place when issuing or consuming nonces.
+    nonces : Nonces;
   };
 
-  /// Owns a transient nonce store internally — declare as `transient let`
-  /// in a `persistent actor`. Nonces are intentionally dropped on
-  /// upgrade: any user mid-flow simply retries inside the 5-minute
-  /// freshness window.
-  public class Verifier(config : Config) {
+  /// Stateless façade over the nonce store and the verify pipeline.
+  /// Declare as `transient let` in a `persistent actor` — it gets
+  /// rebuilt every upgrade and re-binds to the same `Nonces` value.
+  public class IdentityAttributesProvider(config : Config) {
 
-    let store : Challenges.Store = Challenges.empty();
-
-    /// Mint a fresh single-use nonce. Call from your anonymous "begin"
+    /// Mint a fresh single-use nonce. Call from your anonymous "start"
     /// method (the FE pre-fetches the nonce before sign-in) and return
     /// the blob so the FE can pass it to
     /// `authClient.requestAttributes({ nonce, keys })`.
-    public func nonce<system>() : async Blob {
-      await Challenges.issue<system>(store)
+    public func createNonce<system>() : async Blob {
+      await Challenges.issue<system>(config.nonces)
     };
 
     /// Verify the attribute bundle attached to the current call. On
@@ -55,13 +58,15 @@ module {
     ///      `trusted_attribute_signers` env var (enforced by
     ///      `mo:core/CallerAttributes`; this layer traps if not).
     ///   2. `implicit:origin` matches the configured `origin`.
-    ///   3. `implicit:nonce` is one *this verifier* issued, single-use,
+    ///   3. `implicit:nonce` is one *this canister* issued, single-use,
     ///      not yet redeemed.
     ///   4. `implicit:issued_at_timestamp_ns` is within 5 minutes of now.
     ///
     /// On `#err`, nothing about the bundle is trustworthy.
-    public func verify<system>() : Result.Result<Verified, Error> {
-      Verify.verify<system>({ origin = config.origin; store })
+    public func getVerifiedAttributes<system>()
+      : Result.Result<VerifiedAttributes, Error>
+    {
+      Verify.verify<system>({ origin = config.origin; store = config.nonces })
     };
   };
 

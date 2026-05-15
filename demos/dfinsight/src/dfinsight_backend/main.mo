@@ -58,10 +58,15 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // who steals the nonce ends up authenticating as themselves, and
   // the admin allowlist rejects them).
   //
-  // `var` so `setRpOrigin` can rebuild the verifier when the
+  let nonces = II.emptyNonces();
+
+  // `var` so `setRpOrigin` can rebuild the provider when the
   // controller changes the origin (typically a one-time post-deploy
-  // call — pending nonces, if any, are dropped, which is fine).
-  transient var verifier = II.Verifier({ origin = rpOrigin });
+  // call — the rebuilt provider still binds to the same `nonces`).
+  transient var provider = II.IdentityAttributesProvider({
+    origin = rpOrigin;
+    nonces;
+  });
 
   var nextIssueId : Nat = 0;
 
@@ -162,7 +167,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   /// one on every admin-page load (anonymously, before the SSO popup)
   /// so the click handler stays synchronous.
   public shared func generate_nonce() : async Blob {
-    await verifier.nonce<system>();
+    await provider.createNonce<system>();
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
@@ -294,7 +299,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // the typed slot empty and read the name via the attributes escape
   // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
-    let result = switch (verifier.verify<system>()) {
+    let result = switch (provider.getVerifiedAttributes<system>()) {
       case (#err e) return #err(#Verify e);
       case (#ok r)  r;
     };
@@ -420,7 +425,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   public shared ({ caller }) func setRpOrigin(origin : Text) : async Result.Result<(), Text> {
     if (not Principal.isController(caller)) return #err("not a controller");
     rpOrigin := origin;
-    verifier := II.Verifier({ origin = rpOrigin });
+    provider := II.IdentityAttributesProvider({ origin = rpOrigin; nonces });
     #ok()
   };
 

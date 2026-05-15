@@ -2,10 +2,14 @@ import II "../src/lib";
 import Debug "mo:core/Debug";
 
 do {
-  let verifier = II.Verifier({ origin = "https://example.com" });
+  let nonces = II.emptyNonces();
+  let provider = II.IdentityAttributesProvider({
+    origin = "https://example.com";
+    nonces;
+  });
 
-  ignore verifier.verify;
-  ignore verifier.nonce;
+  ignore provider.createNonce;
+  ignore provider.getVerifiedAttributes;
 
   let _e : II.Error = #NoAttributes;
   ignore _e;

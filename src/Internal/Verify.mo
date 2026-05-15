@@ -18,7 +18,7 @@ import Challenges "./Challenges";
 ///   5. `implicit:nonce` is one this canister issued, not yet consumed.
 module {
 
-  public type Verified = Attributes.Verified;
+  public type VerifiedAttributes = Attributes.VerifiedAttributes;
 
   public type Config = {
     origin : Text;
@@ -57,7 +57,7 @@ module {
   /// canister-side nonce-age check.
   let maxAgeNs : Nat = 300_000_000_000;
 
-  public func verify<system>(config : Config) : Result.Result<Verified, Error> {
+  public func verify<system>(config : Config) : Result.Result<VerifiedAttributes, Error> {
 
     let ?rawBundle = CallerAttributes.getAttributes<system>() else return #err(#NoAttributes);
     let ?decoded   = Value.decode(rawBundle)                  else return #err(#MalformedCandid);
@@ -81,7 +81,7 @@ module {
       case (#ok) {};
     };
 
-    #ok(Attributes.asVerified(attrs))
+    #ok(Attributes.asVerifiedAttributes(attrs))
   };
 
 };
