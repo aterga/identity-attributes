@@ -33,19 +33,19 @@ import List "mo:core/List";
 persistent actor {
   let nonces = List.empty<Blob>();
 
-  transient let provider = IdentityAttributesProvider.IdentityAttributesProvider({
+  transient let identityAttributesProvider = IdentityAttributesProvider.IdentityAttributesProvider({
     origin = "https://your-app.icp0.io";
     nonces;
   });
 
   // Pre-fetched anonymously by the frontend before II sign-in.
   public shared func authStart() : async Blob {
-    await provider.createNonce<system>()
+    await identityAttributesProvider.createNonce<system>()
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared func authFinish() : async () {
-    let #ok verifiedAttributes = provider.getVerifiedAttributes<system>() else return;
+    let #ok verifiedAttributes = identityAttributesProvider.getVerifiedAttributes<system>() else return;
     // e.g. update the caller's profile with verifiedAttributes.name and verifiedAttributes.verified_email.
   };
 };
@@ -56,9 +56,9 @@ persistent actor {
 ```motoko
 IdentityAttributesProvider(config)       : IdentityAttributesProvider
 
-// Methods on the provider instance:
-provider.createNonce<system>()           : async Blob
-provider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, Error>
+// Methods on the IdentityAttributesProvider instance:
+identityAttributesProvider.createNonce<system>()           : async Blob
+identityAttributesProvider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, Error>
 
 type Nonces = List.List<Blob>;
 
