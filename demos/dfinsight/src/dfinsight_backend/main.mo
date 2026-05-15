@@ -165,7 +165,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   /// one on every admin-page load (anonymously, before the SSO popup)
   /// so the click handler stays synchronous.
   public shared func generate_nonce() : async Blob {
-    await provider.createNonce<system>();
+    await provider.nonce<system>();
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
@@ -297,7 +297,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // the typed slot empty and read the name via the attributes escape
   // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
-    let result = switch (provider.getVerifiedIdentityAttributes<system>()) {
+    let result = switch (provider.get<system>()) {
       case (#err e) return #err(#Verify e);
       case (#ok r)  r;
     };

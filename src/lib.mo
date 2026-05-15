@@ -41,7 +41,7 @@ module {
     /// `nonces`, return the blob. The frontend pre-fetches this before
     /// sign-in and passes it to
     /// `authClient.requestAttributes({ nonce, keys })`.
-    public func createNonce<system>() : async Blob {
+    public func nonce<system>() : async Blob {
       await Challenges.issue<system>(config.nonces)
     };
 
@@ -55,11 +55,11 @@ module {
     ///      `mo:core/CallerAttributes`; this layer traps if not).
     ///   2. `implicit:origin` matches the configured `origin`.
     ///   3. `implicit:nonce` is one *this canister* issued via
-    ///      `createNonce`, single-use, not yet redeemed.
+    ///      `nonce`, single-use, not yet redeemed.
     ///   4. `implicit:issued_at_timestamp_ns` is within 5 minutes of now.
     ///
     /// On `#err`, nothing about the bundle is trustworthy.
-    public func getVerifiedIdentityAttributes<system>()
+    public func get<system>()
       : Result.Result<VerifiedIdentityAttributes, IdentityAttributesError>
     {
       Verify.verify<system>({ origin = config.origin; store = config.nonces })

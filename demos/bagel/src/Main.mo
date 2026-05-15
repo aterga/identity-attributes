@@ -82,7 +82,7 @@ persistent actor Bagel {
   /// to call anonymously — the frontend fetches this on page load,
   /// before the user signs in with II.
   public func generate_nonce() : async Blob {
-    await provider.createNonce<system>()
+    await provider.nonce<system>()
   };
 
   /// Step 3: verify the attribute bundle and register the caller as a
@@ -99,7 +99,7 @@ persistent actor Bagel {
     // The frontend requests the custom-scoped `sso:dfinity.org:email`
     // key — outside the typed `Verified` surface, so read it via the
     // escape hatch below.
-    let result = switch (provider.getVerifiedIdentityAttributes<system>()) {
+    let result = switch (provider.get<system>()) {
       case (#err e) { return #err(#Verify e) };
       case (#ok r)  r;
     };

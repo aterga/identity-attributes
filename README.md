@@ -40,12 +40,12 @@ persistent actor {
 
   // Pre-fetched anonymously by the frontend before Internet Identity sign-in.
   public shared func authStart() : async Blob {
-    await identityAttributesProvider.createNonce<system>()
+    await identityAttributesProvider.nonce<system>()
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared func authFinish() : async () {
-    let #ok verifiedIdentityAttributes = identityAttributesProvider.getVerifiedIdentityAttributes<system>() else return;
+    let #ok verifiedIdentityAttributes = identityAttributesProvider.get<system>() else return;
     // For example, update the caller's profile with verifiedIdentityAttributes.name and verifiedIdentityAttributes.verified_email.
   };
 };
@@ -54,11 +54,11 @@ persistent actor {
 ## API
 
 ```motoko
-IdentityAttributesProvider(config)                                 : IdentityAttributesProvider
+IdentityAttributesProvider(config)         : IdentityAttributesProvider
 
 // Methods on the IdentityAttributesProvider instance:
-identityAttributesProvider.createNonce<system>()                   : async Blob
-identityAttributesProvider.getVerifiedIdentityAttributes<system>() : Result<VerifiedIdentityAttributes, IdentityAttributesError>
+identityAttributesProvider.nonce<system>() : async Blob
+identityAttributesProvider.get<system>()   : Result<VerifiedIdentityAttributes, IdentityAttributesError>
 
 type Nonces = List.List<Blob>;
 

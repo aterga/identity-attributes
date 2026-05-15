@@ -9,8 +9,8 @@ do {
     nonces;
   });
 
-  ignore identityAttributesProvider.createNonce;
-  ignore identityAttributesProvider.getVerifiedIdentityAttributes;
+  ignore identityAttributesProvider.nonce;
+  ignore identityAttributesProvider.get;
 
   let _e : IdentityAttributesError = #NoAttributes;
   ignore _e;
