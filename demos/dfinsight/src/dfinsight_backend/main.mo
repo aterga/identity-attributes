@@ -8,6 +8,7 @@ import Int        "mo:core/Int";
 import Nat        "mo:core/Nat";
 import Nat8       "mo:core/Nat8";
 import Array      "mo:core/Array";
+import List       "mo:core/List";
 import VarArray   "mo:core/VarArray";
 import Iter       "mo:core/Iter";
 import Order      "mo:core/Order";
@@ -58,7 +59,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // who steals the nonce ends up authenticating as themselves, and
   // the admin allowlist rejects them).
   //
-  let nonces : II.Nonces = { var entries = [] };
+  let nonces = List.empty<Blob>();
 
   transient var provider = II.IdentityAttributesProvider({
     origin = rpOrigin;

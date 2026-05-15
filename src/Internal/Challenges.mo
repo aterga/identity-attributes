@@ -1,8 +1,8 @@
 import Random "mo:core/Random";
-import Array  "mo:core/Array";
+import List   "mo:core/List";
 import Result "mo:core/Result";
 
-/// Single-use canister-issued nonces. A flat list of blobs.
+/// Single-use canister-issued nonces, held in a `List<Blob>`.
 ///
 /// ## Why nonces are canister-issued
 ///
@@ -17,15 +17,13 @@ import Result "mo:core/Result";
 /// We don't track when each nonce was minted — the bundle's own
 /// `implicit:issued_at_timestamp_ns` field gives the verifier a
 /// 5-minute freshness window, so stale nonces can't be redeemed even
-/// if they're still sitting in the store. The cap (`maxTotal`) plus
-/// FIFO eviction is all the bookkeeping we need.
+/// if they're still sitting in the store.
 ///
 /// ## Memory bounds
 ///
 /// Capped at `maxTotal` entries. On overflow the oldest is evicted —
 /// in legitimate use that's an abandoned flow. Successful `consume`
-/// removes the matched entry. With 4096 entries × 32 bytes ≈ 128 KB
-/// worst case.
+/// removes the matched entry.
 ///
 /// ## Why we don't key by `Principal`
 ///
@@ -40,29 +38,36 @@ module {
   /// Upper bound on store size. FIFO eviction once we hit this.
   public let maxTotal : Nat = 4096;
 
-  public type Store = { var entries : [Blob] };
+  public type Store = List.List<Blob>;
 
   public type ConsumeError = { #UnknownNonce };
-
-  public func empty() : Store { { var entries = [] } };
 
   /// Mint a fresh 32-byte random nonce, remember it, return it.
   public func issue<system>(store : Store) : async Blob {
     let nonce = await Random.blob();
-    let trimmed = if (store.entries.size() >= maxTotal) {
-      Array.sliceToArray<Blob>(store.entries, 1, store.entries.size())
-    } else store.entries;
-    store.entries := Array.concat(trimmed, [nonce]);
+    if (List.size(store) >= maxTotal) {
+      // FIFO: drop the oldest before adding the newest. `List` has no
+      // pop-front, so we rebuild without index 0.
+      let rest = List.sliceToArray(store, 1, List.size(store));
+      List.clear(store);
+      for (entry in rest.vals()) { List.add(store, entry) };
+    };
+    List.add(store, nonce);
     nonce
   };
 
-  /// Find and remove the entry matching `nonce`.
+  /// Find and remove the entry matching `nonce`. List has no
+  /// remove-at-index, so we rebuild via filter.
   public func consume(store : Store, nonce : Blob) : Result.Result<(), ConsumeError> {
     var found = false;
-    store.entries := Array.filter<Blob>(store.entries, func entry {
+    let kept = List.filter<Blob>(store, func entry {
       if (not found and entry == nonce) { found := true; false } else true
     });
-    if (found) #ok else #err(#UnknownNonce)
+    if (found) {
+      List.clear(store);
+      for (entry in List.values(kept)) { List.add(store, entry) };
+      #ok
+    } else #err(#UnknownNonce)
   };
 
 };

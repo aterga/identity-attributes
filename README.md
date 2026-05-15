@@ -28,13 +28,11 @@ canisters:
 
 ```motoko
 import IdentityAttributesProvider "mo:identity-attributes";
-import Principal "mo:core/Principal";
+import List "mo:core/List";
 
 persistent actor {
-  let nonces : IdentityAttributesProvider.Nonces = { var entries = [] };
+  let nonces = List.empty<Blob>();
 
-  // Motoko class instances must be `transient` in a persistent actor;
-  // the captured `nonces` survives upgrades via the stable `let` above.
   transient let provider = IdentityAttributesProvider.IdentityAttributesProvider({
     origin = "https://your-app.icp0.io";
     nonces;
@@ -46,8 +44,7 @@ persistent actor {
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
-  public shared ({ caller }) func authFinish() : async () {
-    if (Principal.isAnonymous(caller)) return;
+  public shared func authFinish() : async () {
     let #ok verifiedAttributes = provider.getVerifiedAttributes<system>() else return;
     // e.g. update the caller's profile with verifiedAttributes.name and verifiedAttributes.verified_email.
   };
@@ -63,7 +60,7 @@ IdentityAttributesProvider(config)       : IdentityAttributesProvider
 provider.createNonce<system>()           : async Blob
 provider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, Error>
 
-type Nonces = { var entries : [Blob] };
+type Nonces = List.List<Blob>;
 
 type Config = {
   origin : Text;

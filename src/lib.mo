@@ -16,11 +16,6 @@ import Result     "mo:core/Result";
 /// themselves survive because they're a stable `let`).
 module {
 
-  /// Backing record for canister-issued nonces. Declare inline:
-  ///
-  /// ```motoko
-  /// let nonces : IdentityAttributesProvider.Nonces = { var entries = [] };
-  /// ```
   public type Nonces             = Challenges.Store;
   public type VerifiedAttributes = Attributes.VerifiedAttributes;
   public type Attributes         = Attributes.Attributes;
