@@ -3,7 +3,7 @@ import Map        "mo:core/Map";
 import Principal  "mo:core/Principal";
 import Text       "mo:core/Text";
 import Iter       "mo:core/Iter";
-import List       "mo:core/List";
+import Queue       "mo:core/Queue";
 import Result     "mo:core/Result";
 
 /// Bagel — a pairs-you-for-coffee demo, gated to @dfinity.org users via
@@ -48,7 +48,7 @@ persistent actor Bagel {
   transient let rpOrigin : Text      = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
   transient let allowedDomain : Text = "dfinity.org";
 
-  let nonces = List.empty<Blob>();
+  let nonces = Queue.empty<Blob>();
 
   transient let provider = IdentityAttributesProvider({
     origin = rpOrigin;

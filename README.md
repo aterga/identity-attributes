@@ -28,10 +28,10 @@ canisters:
 
 ```motoko
 import { IdentityAttributesProvider } "mo:identity-attributes";
-import List "mo:core/List";
+import Queue "mo:core/Queue";
 
 persistent actor {
-  let nonces = List.empty<Blob>();
+  let nonces = Queue.empty<Blob>();
 
   transient let identityAttributesProvider = IdentityAttributesProvider({
     origin = "https://your-app.icp0.io";
@@ -60,7 +60,7 @@ IdentityAttributesProvider(config)         : IdentityAttributesProvider
 identityAttributesProvider.nonce<system>() : async Blob
 identityAttributesProvider.get<system>()   : Result<IdentityAttributes, IdentityAttributesError>
 
-type Nonces = List.List<Blob>;
+type Nonces = Queue.Queue<Blob>;
 
 type Config = {
   origin : Text;

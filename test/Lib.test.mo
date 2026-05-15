@@ -1,9 +1,9 @@
 import { IdentityAttributesProvider; type IdentityAttributesError } "../src/lib";
-import List "mo:core/List";
+import Queue "mo:core/Queue";
 import Debug "mo:core/Debug";
 
 do {
-  let nonces = List.empty<Blob>();
+  let nonces = Queue.empty<Blob>();
   let identityAttributesProvider = IdentityAttributesProvider({
     origin = "https://example.com";
     nonces;
