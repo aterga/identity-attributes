@@ -45,7 +45,7 @@ persistent actor {
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared func authFinish() : async () {
-    let #ok verifiedIdentityAttributes = identityAttributesProvider.get<system>() else return;
+    let #ok identityAttributes = identityAttributesProvider.get<system>() else return;
     // For example, update the caller's profile with name and verified_email.
   };
 };
@@ -89,7 +89,7 @@ type IdentityAttributesError = {
 };
 ```
 
-`verifiedIdentityAttributes.attributes` has `getText(key)`, `getNat(key)`,
+`identityAttributes.attributes` has `getText(key)`, `getNat(key)`,
 `getBlob(key)`, `has(key)` for keys outside the typed surface —
 implicit fields, enterprise SSO (`sso:<domain>:*`), the raw `email`.
 
