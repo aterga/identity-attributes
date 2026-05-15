@@ -58,7 +58,12 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // who steals the nonce ends up authenticating as themselves, and
   // the admin allowlist rejects them).
   //
-  let nonces = II.emptyNonces();
+  let nonces : II.Nonces = { var entries = [] };
+
+  transient var provider = II.IdentityAttributesProvider({
+    origin = rpOrigin;
+    nonces;
+  });
 
   var nextIssueId : Nat = 0;
 
@@ -159,7 +164,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   /// one on every admin-page load (anonymously, before the SSO popup)
   /// so the click handler stays synchronous.
   public shared func generate_nonce() : async Blob {
-    await II.createNonce<system>(nonces);
+    await provider.createNonce<system>();
   };
 
   /// Anyone signed in (i.e. non-anonymous principal — either an SSO
@@ -291,7 +296,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // the typed slot empty and read the name via the attributes escape
   // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
-    let result = switch (II.getVerifiedAttributes<system>({ origin = rpOrigin; nonces })) {
+    let result = switch (provider.getVerifiedAttributes<system>()) {
       case (#err e) return #err(#Verify e);
       case (#ok r)  r;
     };
@@ -417,6 +422,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   public shared ({ caller }) func setRpOrigin(origin : Text) : async Result.Result<(), Text> {
     if (not Principal.isController(caller)) return #err("not a controller");
     rpOrigin := origin;
+    provider := II.IdentityAttributesProvider({ origin = rpOrigin; nonces });
     #ok()
   };
 

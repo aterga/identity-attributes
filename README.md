@@ -31,22 +31,24 @@ import IdentityAttributesProvider "mo:identity-attributes";
 import Principal "mo:core/Principal";
 
 persistent actor {
-  // `transient` clears nonces on upgrade — users mid-flow retry. Use
-  // plain `let` to preserve nonces across upgrades instead.
-  transient let nonces = IdentityAttributesProvider.emptyNonces();
+  let nonces : IdentityAttributesProvider.Nonces = { var entries = [] };
+
+  // Motoko class instances must be `transient` in a persistent actor;
+  // the captured `nonces` survives upgrades via the stable `let` above.
+  transient let provider = IdentityAttributesProvider.IdentityAttributesProvider({
+    origin = "https://your-app.icp0.io";
+    nonces;
+  });
 
   // Pre-fetched anonymously by the frontend before II sign-in.
   public shared func authStart() : async Blob {
-    await IdentityAttributesProvider.createNonce<system>(nonces)
+    await provider.createNonce<system>()
   };
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared ({ caller }) func authFinish() : async () {
     if (Principal.isAnonymous(caller)) return;
-    let #ok verifiedAttributes = IdentityAttributesProvider.getVerifiedAttributes<system>({
-      origin = "https://your-app.icp0.io";
-      nonces;
-    }) else return;
+    let #ok verifiedAttributes = provider.getVerifiedAttributes<system>() else return;
     // e.g. update the caller's profile with verifiedAttributes.name and verifiedAttributes.verified_email.
   };
 };
@@ -55,9 +57,13 @@ persistent actor {
 ## API
 
 ```motoko
-emptyNonces()                          : Nonces
-createNonce<system>(nonces)            : async Blob
-getVerifiedAttributes<system>(config)  : Result<VerifiedAttributes, Error>
+IdentityAttributesProvider(config)       : IdentityAttributesProvider
+
+// Methods on the provider instance:
+provider.createNonce<system>()           : async Blob
+provider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, Error>
+
+type Nonces = { var entries : [Blob] };
 
 type Config = {
   origin : Text;

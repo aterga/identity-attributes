@@ -47,7 +47,12 @@ persistent actor Bagel {
   transient let rpOrigin : Text      = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
   transient let allowedDomain : Text = "dfinity.org";
 
-  transient let nonces = II.emptyNonces();
+  let nonces : II.Nonces = { var entries = [] };
+
+  transient let provider = II.IdentityAttributesProvider({
+    origin = rpOrigin;
+    nonces;
+  });
   // Principals known to belong to DFINITY employees, populated by
   // `register()` after the bundle has been fully verified. Subsequent
   // calls (join_round, reset) just look up against this map — no
@@ -76,7 +81,7 @@ persistent actor Bagel {
   /// to call anonymously — the frontend fetches this on page load,
   /// before the user signs in with II.
   public func generate_nonce() : async Blob {
-    await II.createNonce<system>(nonces)
+    await provider.createNonce<system>()
   };
 
   /// Step 3: verify the attribute bundle and register the caller as a
@@ -93,7 +98,7 @@ persistent actor Bagel {
     // The frontend requests the custom-scoped `sso:dfinity.org:email`
     // key — outside the typed `Verified` surface, so read it via the
     // escape hatch below.
-    let result = switch (II.getVerifiedAttributes<system>({ origin = rpOrigin; nonces })) {
+    let result = switch (provider.getVerifiedAttributes<system>()) {
       case (#err e) { return #err(#Verify e) };
       case (#ok r)  r;
     };
