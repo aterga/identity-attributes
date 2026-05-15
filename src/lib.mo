@@ -17,8 +17,8 @@ import Result     "mo:core/Result";
 module {
 
   public type Nonces             = Challenges.Store;
-  public type VerifiedIdentityAttributes = Attributes.VerifiedIdentityAttributes;
-  public type IdentityAttributes = Attributes.Attributes;
+  public type IdentityAttributes      = Attributes.IdentityAttributes;
+  public type Attributes              = Attributes.Attributes;
   public type IdentityAttributesError = Verify.Error;
 
   public type Config = {
@@ -60,7 +60,7 @@ module {
     ///
     /// On `#err`, nothing about the bundle is trustworthy.
     public func get<system>()
-      : Result.Result<VerifiedIdentityAttributes, IdentityAttributesError>
+      : Result.Result<IdentityAttributes, IdentityAttributesError>
     {
       Verify.verify<system>({ origin = config.origin; store = config.nonces })
     };

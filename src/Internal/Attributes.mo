@@ -6,7 +6,7 @@ import Value "./Value";
 /// exact key via `getText`/`getNat`/`getBlob`/`has`. The raw ICRC-3
 /// `Value` is internal and not exposed.
 ///
-/// `VerifiedIdentityAttributes` is the typed result of `Verify.verify`: every known
+/// `IdentityAttributes` is the typed result of `Verify.verify`: every known
 /// provider's `name` and `verified_email` surfaced as optional fields,
 /// plus the underlying `Attributes` for any custom-scoped keys (for
 /// example, enterprise `sso:<domain>:*`) or the raw unverified `email`.
@@ -72,7 +72,7 @@ module {
   /// For enterprise SSO keys outside the four named providers, read
   /// directly from `attributes` — for example,
   /// `attributes.getText("sso:dfinity.org:verified_email")`.
-  public type VerifiedIdentityAttributes = {
+  public type IdentityAttributes = {
     name                     : ?Text;
     verified_email           : ?Text;
     google_name              : ?Text;
@@ -90,11 +90,11 @@ module {
     switch value { case (#Map entries) ?Attributes(entries); case _ null };
   };
 
-  /// Populate `VerifiedIdentityAttributes` from a decoded bundle. Pulls each known
+  /// Populate `IdentityAttributes` from a decoded bundle. Pulls each known
   /// provider's keys with exact-match — an unscoped `name` is *not* the
   /// same key as `openid:google:name`, so they end up in different
   /// fields.
-  public func asVerifiedIdentityAttributes(attributes : Attributes) : VerifiedIdentityAttributes {
+  public func asIdentityAttributes(attributes : Attributes) : IdentityAttributes {
     let googlePrefix    = "openid:https://accounts.google.com:";
     let applePrefix     = "openid:https://appleid.apple.com:";
     // `{tid}` is a *literal* part of the URL Internet Identity emits.

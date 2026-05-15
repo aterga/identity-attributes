@@ -58,7 +58,7 @@ IdentityAttributesProvider(config)         : IdentityAttributesProvider
 
 // Methods on the IdentityAttributesProvider instance:
 identityAttributesProvider.nonce<system>() : async Blob
-identityAttributesProvider.get<system>()   : Result<VerifiedIdentityAttributes, IdentityAttributesError>
+identityAttributesProvider.get<system>()   : Result<IdentityAttributes, IdentityAttributesError>
 
 type Nonces = List.List<Blob>;
 
@@ -67,7 +67,7 @@ type Config = {
   nonces : Nonces;
 };
 
-type VerifiedIdentityAttributes = {
+type IdentityAttributes = {
   name                     : ?Text;
   verified_email           : ?Text;
   google_name              : ?Text;
@@ -76,7 +76,7 @@ type VerifiedIdentityAttributes = {
   apple_verified_email     : ?Text;
   microsoft_name           : ?Text;
   microsoft_verified_email : ?Text;
-  attributes               : IdentityAttributes;
+  attributes               : Attributes;
 };
 
 type IdentityAttributesError = {
