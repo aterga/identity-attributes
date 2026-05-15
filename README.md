@@ -27,13 +27,13 @@ canisters:
 ## Usage
 
 ```motoko
-import IdentityAttributesProvider "mo:identity-attributes";
+import { IdentityAttributesProvider } "mo:identity-attributes";
 import List "mo:core/List";
 
 persistent actor {
   let nonces = List.empty<Blob>();
 
-  transient let identityAttributesProvider = IdentityAttributesProvider.IdentityAttributesProvider({
+  transient let identityAttributesProvider = IdentityAttributesProvider({
     origin = "https://your-app.icp0.io";
     nonces;
   });
