@@ -297,7 +297,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // the typed slot empty and read the name via the attributes escape
   // hatch below.
   func verifyAdminAttributes<system>() : Result.Result<Text, AdminError> {
-    let result = switch (provider.getVerifiedAttributes<system>()) {
+    let result = switch (provider.getVerifiedIdentityAttributes<system>()) {
       case (#err e) return #err(#Verify e);
       case (#ok r)  r;
     };

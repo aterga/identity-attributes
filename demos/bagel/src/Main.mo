@@ -99,7 +99,7 @@ persistent actor Bagel {
     // The frontend requests the custom-scoped `sso:dfinity.org:email`
     // key — outside the typed `Verified` surface, so read it via the
     // escape hatch below.
-    let result = switch (provider.getVerifiedAttributes<system>()) {
+    let result = switch (provider.getVerifiedIdentityAttributes<system>()) {
       case (#err e) { return #err(#Verify e) };
       case (#ok r)  r;
     };

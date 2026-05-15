@@ -45,7 +45,7 @@ persistent actor {
 
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared func authFinish() : async () {
-    let #ok verifiedAttributes = identityAttributesProvider.getVerifiedAttributes<system>() else return;
+    let #ok verifiedAttributes = identityAttributesProvider.getVerifiedIdentityAttributes<system>() else return;
     // e.g. update the caller's profile with verifiedAttributes.name and verifiedAttributes.verified_email.
   };
 };
@@ -58,7 +58,7 @@ IdentityAttributesProvider(config)       : IdentityAttributesProvider
 
 // Methods on the IdentityAttributesProvider instance:
 identityAttributesProvider.createNonce<system>()           : async Blob
-identityAttributesProvider.getVerifiedAttributes<system>() : Result<VerifiedAttributes, IdentityAttributesError>
+identityAttributesProvider.getVerifiedIdentityAttributes<system>() : Result<VerifiedIdentityAttributes, IdentityAttributesError>
 
 type Nonces = List.List<Blob>;
 
@@ -67,7 +67,7 @@ type Config = {
   nonces : Nonces;
 };
 
-type VerifiedAttributes = {
+type VerifiedIdentityAttributes = {
   name                     : ?Text;
   verified_email           : ?Text;
   google_name              : ?Text;

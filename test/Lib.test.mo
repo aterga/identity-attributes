@@ -10,7 +10,7 @@ do {
   });
 
   ignore identityAttributesProvider.createNonce;
-  ignore identityAttributesProvider.getVerifiedAttributes;
+  ignore identityAttributesProvider.getVerifiedIdentityAttributes;
 
   let _e : IdentityAttributesError = #NoAttributes;
   ignore _e;

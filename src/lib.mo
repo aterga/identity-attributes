@@ -17,8 +17,8 @@ import Result     "mo:core/Result";
 module {
 
   public type Nonces             = Challenges.Store;
-  public type VerifiedAttributes = Attributes.VerifiedAttributes;
-  public type Attributes         = Attributes.Attributes;
+  public type VerifiedIdentityAttributes = Attributes.VerifiedIdentityAttributes;
+  public type IdentityAttributes = Attributes.Attributes;
   public type IdentityAttributesError = Verify.Error;
 
   public type Config = {
@@ -59,8 +59,8 @@ module {
     ///   4. `implicit:issued_at_timestamp_ns` is within 5 minutes of now.
     ///
     /// On `#err`, nothing about the bundle is trustworthy.
-    public func getVerifiedAttributes<system>()
-      : Result.Result<VerifiedAttributes, IdentityAttributesError>
+    public func getVerifiedIdentityAttributes<system>()
+      : Result.Result<VerifiedIdentityAttributes, IdentityAttributesError>
     {
       Verify.verify<system>({ origin = config.origin; store = config.nonces })
     };

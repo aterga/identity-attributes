@@ -31,9 +31,9 @@ do {
   assert attrs.has("implicit:origin");
   assert not attrs.has("phone_number");
 
-  // ---- asVerifiedAttributes: every known provider populated independently ----
+  // ---- asVerifiedIdentityAttributes: every known provider populated independently ----
 
-  let v = Attributes.asVerifiedAttributes(attrs);
+  let v = Attributes.asVerifiedIdentityAttributes(attrs);
 
   assert v.name == ?"Alice";
   assert v.verified_email == ?"alice@verified.com";
