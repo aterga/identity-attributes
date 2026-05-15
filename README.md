@@ -46,7 +46,7 @@ persistent actor {
   // Called authenticated (AttributesIdentity-wrapped) after sign-in.
   public shared func authFinish() : async () {
     let #ok verifiedIdentityAttributes = identityAttributesProvider.get<system>() else return;
-    // For example, update the caller's profile with verifiedIdentityAttributes.name and verifiedIdentityAttributes.verified_email.
+    // For example, update the caller's profile with name and verified_email.
   };
 };
 ```
