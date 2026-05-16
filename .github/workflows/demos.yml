@@ -33,6 +33,17 @@ concurrency:
   group: demos-${{ github.ref }}
   cancel-in-progress: true
 
+# Minimum-privilege token. This workflow runs PR-supplied build scripts
+# (npm install, mops install, scripts/build-backend.sh, scripts/deploy.sh,
+# moc compile, Vite build) on a local replica — code that's untrusted on
+# PR triggers. Restrict the auto-issued GITHUB_TOKEN to read-only so a
+# compromised step can't push, open issues, or otherwise mutate the
+# repo. The `gh release view` call in the launcher pre-download step
+# only reads from a public release, which is permitted by `contents:
+# read`.
+permissions:
+  contents: read
+
 jobs:
   bagel:
     name: Bagel — build + local deploy
@@ -50,19 +61,36 @@ jobs:
           cache: npm
           cache-dependency-path: demos/bagel/frontend/package-lock.json
 
+      # Pinned versions. icp-cli is locked to the demo's `.icp-cli-version`
+      # (`demos/dfinsight/.icp-cli-version`) so CI tests the same CLI
+      # surface developers and mainnet deploys use. `ic-wasm` and
+      # `ic-mops` versions are picked up from the npm registry's latest
+      # at workflow-author time; bump them deliberately when needed,
+      # rather than letting a transitive release silently break CI.
       - name: Install icp-cli, ic-wasm, mops
-        run: npm install --global @icp-sdk/icp-cli @icp-sdk/ic-wasm ic-mops
+        run: npm install --global @icp-sdk/icp-cli@0.2.0 @icp-sdk/ic-wasm@0.9.11 ic-mops@2.13.2
 
+      # Key the cache on the demo's mops.toml AND the repo-root source
+      # tree, since bagel's mops.toml has `identity-attributes = "../.."`
+      # pointing at the root package — changes to `src/**` or the root
+      # `mops.toml` should invalidate the cache too. Otherwise we'd
+      # build against a stale resolution of the local-path dep.
       - name: Cache mops + moc toolchain
         uses: actions/cache@v4
         with:
           path: |
             demos/bagel/.mops
             ~/.cache/mops
-          key: mops-bagel-${{ runner.os }}-${{ hashFiles('demos/bagel/mops.toml') }}
+          key: mops-bagel-${{ runner.os }}-${{ hashFiles('demos/bagel/mops.toml', 'mops.toml', 'mops.lock', 'src/**') }}
 
+      # Belt-and-braces: even with the cache key invalidating on src/**,
+      # a cached `.mops/identity-attributes` symlink can point at a path
+      # that doesn't exist on this runner (the dfinsight build script
+      # has the same `rm -rf` for the same reason). Wipe before install.
       - name: Resolve mops deps + moc toolchain
-        run: mops install
+        run: |
+          rm -rf .mops/identity-attributes
+          mops install
 
       # `icp network start` looks up the latest network-launcher version
       # via the unauthenticated GitHub API, which hits the 60 req/hr
@@ -122,16 +150,29 @@ jobs:
           cache: npm
           cache-dependency-path: demos/dfinsight/package-lock.json
 
+      # Pinned versions. icp-cli is locked to the demo's `.icp-cli-version`
+      # (`demos/dfinsight/.icp-cli-version`) so CI tests the same CLI
+      # surface developers and mainnet deploys use. `ic-wasm` and
+      # `ic-mops` versions are picked up from the npm registry's latest
+      # at workflow-author time; bump them deliberately when needed,
+      # rather than letting a transitive release silently break CI.
       - name: Install icp-cli, ic-wasm, mops
-        run: npm install --global @icp-sdk/icp-cli @icp-sdk/ic-wasm ic-mops
+        run: npm install --global @icp-sdk/icp-cli@0.2.0 @icp-sdk/ic-wasm@0.9.11 ic-mops@2.13.2
 
+      # Cache key includes the repo-root source tree because
+      # `identity-attributes = "../../../.."` in the backend's
+      # mops.toml resolves to the root package. Same rationale as the
+      # bagel job above. `scripts/build-backend.sh` also wipes
+      # `.mops/identity-attributes` before install as a self-heal for
+      # stale absolute-path resolutions, so we don't need to repeat
+      # the wipe here.
       - name: Cache mops + moc toolchain
         uses: actions/cache@v4
         with:
           path: |
             demos/dfinsight/src/dfinsight_backend/.mops
             ~/.cache/mops
-          key: mops-dfinsight-${{ runner.os }}-${{ hashFiles('demos/dfinsight/src/dfinsight_backend/mops.toml') }}
+          key: mops-dfinsight-${{ runner.os }}-${{ hashFiles('demos/dfinsight/src/dfinsight_backend/mops.toml', 'mops.toml', 'mops.lock', 'src/**') }}
 
       - name: Resolve mops deps + moc toolchain
         run: mops install

@@ -1,13 +1,14 @@
-// Placeholder so `mops test` finds at least one *.test.mo file.
+// Workaround for `mops test` failing with "No test files found" when a
+// package has zero `*.test.mo` files.
 //
-// `demos/bagel/icp.yaml` runs `mops test` as part of every build to
-// surface regressions like the `rpOrigin` transient mishap (where
-// `let` defaults to `stable` in `persistent actor`) before the wasm
-// goes anywhere near a canister. With zero test files mops exits 1
-// and the deploy fails.
-//
-// Replace this with real tests when bagel grows them (e.g. pool
-// fairness across draws, attribute-bundle expiry handling, etc.).
+// `demos/bagel/icp.yaml` runs `mops test` as part of every build. If
+// the directory is empty, mops exits 1 and the build fails. This file
+// exists solely to give mops something to find — it does not exercise
+// any bagel canister code (no import of `Main.mo`, no actor
+// instantiation), so a regression in the backend wouldn't be caught
+// here. Replace it with real tests when bagel grows them (pool
+// fairness across draws, attribute-bundle expiry handling,
+// rpOrigin stable-field upgrade compatibility, etc.).
 do {
   assert 1 + 1 == 2;
 };
