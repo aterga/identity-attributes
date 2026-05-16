@@ -25,13 +25,24 @@ cd "$(dirname "$0")/.."
 cd src/dfinsight_backend
 
 # `identity-attributes = "../../../.."` in mops.toml is a local-path
-# dep. mops resolves it once on install and caches the resolution
-# under `.mops/`. If the original install happened inside a git
-# worktree that's since been deleted (e.g. a Claude Code worktree
-# under `.claude/worktrees/`), the cache points at a now-nonexistent
-# path and moc fails with M0012. Wipe the cache for the local-path
-# dep before each install so it always re-resolves against this
-# checkout. Registry deps in `.mops/` are left alone.
+# dep. Two pieces of state can pin it to a now-invalid absolute path
+# (e.g. a deleted git worktree), and moc then fails with M0012:
+#
+#   1. `mops.lock` — committed lockfile. mops bakes the absolute
+#      resolved path into the `deps.identity-attributes` field, which
+#      makes it machine-specific. If the lockfile has an absolute
+#      path (anything starting with `/`), wipe it so mops regenerates
+#      a fresh resolution against this checkout's mops.toml.
+#   2. `.mops/identity-attributes` — cached resolution from a
+#      previous install. Same machine-specificity story.
+#
+# Both are also gitignored at the repo root (mops.lock for this demo)
+# but historical commits can still surface them; the defensive
+# wipes below mean the build self-heals on any checkout.
+if [ -f mops.lock ] && grep -qE '"identity-attributes": *"/' mops.lock; then
+  echo "==> mops.lock pins identity-attributes to an absolute path — regenerating" >&2
+  rm -f mops.lock
+fi
 rm -rf .mops/identity-attributes
 
 mops install
