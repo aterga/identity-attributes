@@ -1,5 +1,4 @@
 import { IdentityAttributesProvider; type IdentityAttributesError } "mo:identity-attributes";
-import { migration } "Migration";
 
 import Map        "mo:core/Map";
 import Principal  "mo:core/Principal";
@@ -25,15 +24,6 @@ import Blob       "mo:core/Blob";
 /// SSO flow plus the `sso:dfinity.org:name` attribute, which the
 /// canister verifies via `mo:identity-attributes` (which itself reads
 /// the IC `sender_info` from `mo:core/CallerAttributes`).
-
-// `(with migration)` wires the stable-type bridge defined in
-// `Migration.mo` into the upgrade path. Needed for the production
-// backend (`lu3pu-…`), which was last installed with the pre-`cb96a7e`
-// version of `mo:identity-attributes` and stores `nonces` with the
-// older `Map<Principal, [{nonce, expiresAtNs}]>` shape. See
-// `Migration.mo` for why the migration is safe and what fields it
-// touches.
-(with migration)
 persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // --------------------------------------------------------------- config --
