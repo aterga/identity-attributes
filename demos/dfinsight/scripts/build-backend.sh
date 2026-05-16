@@ -12,7 +12,16 @@ set -euo pipefail
 # whatever `which node` resolves to, which on macOS+nvm is often a
 # stale v20. If nvm is available, source it and switch to a current
 # Node before running `mops`.
-if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+#
+# Skip in CI: GitHub Actions sets up Node 22 via `actions/setup-node`
+# and installs `mops` globally against that Node version's prefix.
+# Sourcing nvm here would switch PATH to a *different* Node version
+# preinstalled on the runner, and the previously-installed `mops`
+# would disappear from PATH — exiting the script silently under
+# `set -e` before mops can complain. `${CI:-}` is set to `true` on
+# GitHub-hosted runners; the empty-string default keeps `set -u`
+# happy when CI is unset locally.
+if [ -z "${CI:-}" ] && [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
   # shellcheck disable=SC1091
   # `set -u` (pipefail above) trips on nvm.sh's unset-variable
   # references — e.g. on GitHub Actions runners where nvm is
