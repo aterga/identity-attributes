@@ -64,6 +64,31 @@ jobs:
       - name: Resolve mops deps + moc toolchain
         run: mops install
 
+      # `icp network start` looks up the latest network-launcher version
+      # via the unauthenticated GitHub API, which hits the 60 req/hr
+      # rate limit on shared CI runner IPs. Pre-download the launcher
+      # ourselves using the runner's authenticated GITHUB_TOKEN and
+      # point icp-cli at it so it skips the API call entirely. See
+      # https://github.com/dfinity/examples/blob/master/.github/workflows/pre-download-launcher.sh
+      # — this is a copy of that workaround.
+      - name: Pre-download network launcher (avoid GitHub API rate limit)
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VERSION=$(gh release view --repo dfinity/icp-cli-network-launcher --json tagName -q .tagName)
+          TARBALL="icp-cli-network-launcher-x86_64-linux-${VERSION}"
+          LAUNCHER_DIR="${HOME}/.icp-cli-launcher"
+          mkdir -p "$LAUNCHER_DIR"
+          curl -fsSL \
+            "https://github.com/dfinity/icp-cli-network-launcher/releases/download/${VERSION}/${TARBALL}.tar.gz" \
+            | tar xz -C "$LAUNCHER_DIR"
+          LAUNCHER_PATH="${LAUNCHER_DIR}/${TARBALL}/icp-cli-network-launcher"
+          chmod +x "$LAUNCHER_PATH"
+          echo "ICP_CLI_NETWORK_LAUNCHER_PATH=${LAUNCHER_PATH}" >> "$GITHUB_ENV"
+          echo "Launcher ${VERSION} → ${LAUNCHER_PATH}"
+
       # `-d` runs the network as a background subprocess and returns
       # once it's bound to the gateway port — no manual readiness poll
       # needed.
@@ -112,18 +137,28 @@ jobs:
         run: mops install
         working-directory: demos/dfinsight/src/dfinsight_backend
 
-      - name: Start local replica
+      # Same launcher pre-download as the bagel job — see the comment
+      # there for context.
+      - name: Pre-download network launcher (avoid GitHub API rate limit)
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          icp network start &
-          for i in $(seq 1 60); do
-            if curl -fs http://127.0.0.1:4943/api/v2/status >/dev/null 2>&1; then
-              echo "replica ready after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "::error::local replica never came up"
-          exit 1
+          set -e
+          VERSION=$(gh release view --repo dfinity/icp-cli-network-launcher --json tagName -q .tagName)
+          TARBALL="icp-cli-network-launcher-x86_64-linux-${VERSION}"
+          LAUNCHER_DIR="${HOME}/.icp-cli-launcher"
+          mkdir -p "$LAUNCHER_DIR"
+          curl -fsSL \
+            "https://github.com/dfinity/icp-cli-network-launcher/releases/download/${VERSION}/${TARBALL}.tar.gz" \
+            | tar xz -C "$LAUNCHER_DIR"
+          LAUNCHER_PATH="${LAUNCHER_DIR}/${TARBALL}/icp-cli-network-launcher"
+          chmod +x "$LAUNCHER_PATH"
+          echo "ICP_CLI_NETWORK_LAUNCHER_PATH=${LAUNCHER_PATH}" >> "$GITHUB_ENV"
+          echo "Launcher ${VERSION} → ${LAUNCHER_PATH}"
+
+      - name: Start local replica
+        run: icp network start -d
 
       # scripts/deploy.sh -e local mints fresh canister ids on the
       # local replica, bakes the backend id into the frontend bundle,
