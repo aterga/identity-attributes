@@ -105,6 +105,15 @@ The script does the two things a one-shot `icp deploy -e ic` can't:
    upgrades. Mismatch produces `#OriginMismatch` from
    `mo:identity-attributes` on every admin verify.
 
+The on-chain canister ids are pinned in
+`.icp/data/mappings/ic.ids.json` — that file binds the canister names
+in `icp.yaml` to existing principals so `scripts/deploy.sh` redeploys
+to those canisters instead of minting fresh ones. The production pair
+is `dfinsight_backend = lu3pu-iiaaa-aaaao-qpuhq-cai`,
+`dfinsight_frontend = jjgb4-3aaaa-aaaao-qpuia-cai` (both on subnet
+`fuqsr-in2lc-…`). Without this mapping the script silently deploys
+to a brand-new pair.
+
 `trusted_attribute_signers` (II's production principal
 `rdmx6-jaaaa-aaaaa-aaadq-cai`) is wired automatically via
 `icp.yaml`'s `settings.environment_variables` — no extra step needed.

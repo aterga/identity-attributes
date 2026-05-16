@@ -13,3 +13,13 @@ demos/*/.env
 demos/*/.icp/cache/
 demos/*/.icp/logs/
 demos/*/.icp/identities/
+
+# Demo mops.lock files. The demos depend on `identity-attributes` as a
+# local-path dep (`../../../..` relative to mops.toml), and `mops` bakes
+# the *absolute* resolved path into mops.lock — which makes the lock
+# machine-specific (and worse, if the original install happened inside
+# a now-deleted git worktree, the path dangles for everyone). The root
+# `mops.lock` is fine because it only has registry deps; only the
+# demo-level lockfiles get ignored.
+demos/bagel/mops.lock
+demos/dfinsight/src/dfinsight_backend/mops.lock

@@ -25,12 +25,17 @@ export function Home() {
 
   return (
     <section className="card">
-      <h1>Dfinsight</h1>
+      <p className="eyebrow">Anonymous · DFINITY</p>
+      <h1>
+        Common matters of <em>interest</em>.
+      </h1>
       <p className="lede">
-        Anonymously share and upvote the matters of interest you'd like DFINITY
-        to address.
+        Anonymously share and upvote the matters of interest you would like
+        DFINITY to address. Posts and votes are tamperproof and end-to-end on
+        the network.
       </p>
       <button onClick={onSignIn} disabled={busy} className="primary">
+        {busy && <span className="spinner sm" aria-hidden="true" />}
         {busy ? "Signing in…" : "Sign in anonymously"}
       </button>
       {error && <p className="error">{error}</p>}
