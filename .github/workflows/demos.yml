@@ -1,0 +1,217 @@
+# Build + deploy both demo apps against a local icp-cli replica on every
+# PR and on pushes to main. Catches build regressions, mops resolution
+# breakage, and Motoko EOP stable-type drift (the deployed wasm has to
+# install cleanly on a fresh local canister — same code path as
+# mainnet, minus the canister id pinning).
+#
+# Both demos share the install + replica boilerplate; what differs is
+# the deploy entry point — bagel relies on icp-cli's inline build,
+# dfinsight wraps it in scripts/deploy.sh which also calls setRpOrigin
+# — and the sanity query that confirms the canister is reachable
+# post-deploy.
+name: Demos
+
+on:
+  pull_request:
+    paths:
+      - "demos/**"
+      - "src/**"
+      - "mops.toml"
+      - "mops.lock"
+      - ".github/workflows/demos.yml"
+  push:
+    branches: [main]
+    paths:
+      - "demos/**"
+      - "src/**"
+      - "mops.toml"
+      - "mops.lock"
+      - ".github/workflows/demos.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: demos-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimum-privilege token. This workflow runs PR-supplied build scripts
+# (npm install, mops install, scripts/build-backend.sh, scripts/deploy.sh,
+# moc compile, Vite build) on a local replica — code that's untrusted on
+# PR triggers. Restrict the auto-issued GITHUB_TOKEN to read-only so a
+# compromised step can't push, open issues, or otherwise mutate the
+# repo. The `gh release view` call in the launcher pre-download step
+# only reads from a public release, which is permitted by `contents:
+# read`.
+permissions:
+  contents: read
+
+jobs:
+  bagel:
+    name: Bagel — build + local deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: demos/bagel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: demos/bagel/frontend/package-lock.json
+
+      # Pinned versions. icp-cli is locked to the demo's `.icp-cli-version`
+      # (`demos/dfinsight/.icp-cli-version`) so CI tests the same CLI
+      # surface developers and mainnet deploys use. `ic-wasm` and
+      # `ic-mops` versions are picked up from the npm registry's latest
+      # at workflow-author time; bump them deliberately when needed,
+      # rather than letting a transitive release silently break CI.
+      - name: Install icp-cli, ic-wasm, mops
+        run: npm install --global @icp-sdk/icp-cli@0.2.0 @icp-sdk/ic-wasm@0.9.11 ic-mops@2.13.2
+
+      # Key the cache on the demo's mops.toml AND the repo-root source
+      # tree, since bagel's mops.toml has `identity-attributes = "../.."`
+      # pointing at the root package — changes to `src/**` or the root
+      # `mops.toml` should invalidate the cache too. Otherwise we'd
+      # build against a stale resolution of the local-path dep.
+      - name: Cache mops + moc toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            demos/bagel/.mops
+            ~/.cache/mops
+          key: mops-bagel-${{ runner.os }}-${{ hashFiles('demos/bagel/mops.toml', 'mops.toml', 'mops.lock', 'src/**') }}
+
+      # Belt-and-braces: even with the cache key invalidating on src/**,
+      # a cached `.mops/identity-attributes` symlink can point at a path
+      # that doesn't exist on this runner (the dfinsight build script
+      # has the same `rm -rf` for the same reason). Wipe before install.
+      - name: Resolve mops deps + moc toolchain
+        run: |
+          rm -rf .mops/identity-attributes
+          mops install
+
+      # `icp network start` looks up the latest network-launcher version
+      # via the unauthenticated GitHub API, which hits the 60 req/hr
+      # rate limit on shared CI runner IPs. Pre-download the launcher
+      # ourselves using the runner's authenticated GITHUB_TOKEN and
+      # point icp-cli at it so it skips the API call entirely. See
+      # https://github.com/dfinity/examples/blob/master/.github/workflows/pre-download-launcher.sh
+      # — this is a copy of that workaround.
+      - name: Pre-download network launcher (avoid GitHub API rate limit)
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VERSION=$(gh release view --repo dfinity/icp-cli-network-launcher --json tagName -q .tagName)
+          TARBALL="icp-cli-network-launcher-x86_64-linux-${VERSION}"
+          LAUNCHER_DIR="${HOME}/.icp-cli-launcher"
+          mkdir -p "$LAUNCHER_DIR"
+          curl -fsSL \
+            "https://github.com/dfinity/icp-cli-network-launcher/releases/download/${VERSION}/${TARBALL}.tar.gz" \
+            | tar xz -C "$LAUNCHER_DIR"
+          LAUNCHER_PATH="${LAUNCHER_DIR}/${TARBALL}/icp-cli-network-launcher"
+          chmod +x "$LAUNCHER_PATH"
+          echo "ICP_CLI_NETWORK_LAUNCHER_PATH=${LAUNCHER_PATH}" >> "$GITHUB_ENV"
+          echo "Launcher ${VERSION} → ${LAUNCHER_PATH}"
+
+      # `-d` runs the network as a background subprocess and returns
+      # once it's bound to the gateway port — no manual readiness poll
+      # needed.
+      - name: Start local replica
+        run: icp network start -d
+
+      # `icp deploy` builds the canister (mops install + mops test +
+      # moc compile), uploads the asset wasm, installs both canisters,
+      # and runs the frontend's `npm ci && npm run build` per icp.yaml.
+      - name: Deploy to local replica
+        run: icp deploy -e local -y
+
+      # Public query, no II dependency — cheapest way to confirm the
+      # canister is installed and responsive after deploy.
+      - name: Sanity query (pool_size)
+        run: icp canister call bagel pool_size '()' -e local --query
+
+  dfinsight:
+    name: Dfinsight — build + local deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: demos/dfinsight
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: demos/dfinsight/package-lock.json
+
+      # Pinned versions. icp-cli is locked to the demo's `.icp-cli-version`
+      # (`demos/dfinsight/.icp-cli-version`) so CI tests the same CLI
+      # surface developers and mainnet deploys use. `ic-wasm` and
+      # `ic-mops` versions are picked up from the npm registry's latest
+      # at workflow-author time; bump them deliberately when needed,
+      # rather than letting a transitive release silently break CI.
+      - name: Install icp-cli, ic-wasm, mops
+        run: npm install --global @icp-sdk/icp-cli@0.2.0 @icp-sdk/ic-wasm@0.9.11 ic-mops@2.13.2
+
+      # Cache key includes the repo-root source tree because
+      # `identity-attributes = "../../../.."` in the backend's
+      # mops.toml resolves to the root package. Same rationale as the
+      # bagel job above. `scripts/build-backend.sh` also wipes
+      # `.mops/identity-attributes` before install as a self-heal for
+      # stale absolute-path resolutions, so we don't need to repeat
+      # the wipe here.
+      - name: Cache mops + moc toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            demos/dfinsight/src/dfinsight_backend/.mops
+            ~/.cache/mops
+          key: mops-dfinsight-${{ runner.os }}-${{ hashFiles('demos/dfinsight/src/dfinsight_backend/mops.toml', 'mops.toml', 'mops.lock', 'src/**') }}
+
+      - name: Resolve mops deps + moc toolchain
+        run: mops install
+        working-directory: demos/dfinsight/src/dfinsight_backend
+
+      # Same launcher pre-download as the bagel job — see the comment
+      # there for context.
+      - name: Pre-download network launcher (avoid GitHub API rate limit)
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VERSION=$(gh release view --repo dfinity/icp-cli-network-launcher --json tagName -q .tagName)
+          TARBALL="icp-cli-network-launcher-x86_64-linux-${VERSION}"
+          LAUNCHER_DIR="${HOME}/.icp-cli-launcher"
+          mkdir -p "$LAUNCHER_DIR"
+          curl -fsSL \
+            "https://github.com/dfinity/icp-cli-network-launcher/releases/download/${VERSION}/${TARBALL}.tar.gz" \
+            | tar xz -C "$LAUNCHER_DIR"
+          LAUNCHER_PATH="${LAUNCHER_DIR}/${TARBALL}/icp-cli-network-launcher"
+          chmod +x "$LAUNCHER_PATH"
+          echo "ICP_CLI_NETWORK_LAUNCHER_PATH=${LAUNCHER_PATH}" >> "$GITHUB_ENV"
+          echo "Launcher ${VERSION} → ${LAUNCHER_PATH}"
+
+      - name: Start local replica
+        run: icp network start -d
+
+      # scripts/deploy.sh -e local mints fresh canister ids on the
+      # local replica, bakes the backend id into the frontend bundle,
+      # runs `icp deploy`, and calls `setRpOrigin` — same chain as
+      # mainnet, just with `http://<frontend>.localhost:4943` as the
+      # origin instead of `https://<frontend>.icp0.io`.
+      - name: Deploy to local replica
+        run: scripts/deploy.sh -e local
+
+      # Public query returning the bootstrap admin list seeded from
+      # init_args — confirms install + init ran cleanly. After
+      # deploy.sh's setRpOrigin call, getRpOrigin would also be a
+      # valid probe, but listAdmins is simpler to grep for in CI logs.
+      - name: Sanity query (listAdmins)
+        run: icp canister call dfinsight_backend listAdmins '()' -e local --query

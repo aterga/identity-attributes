@@ -12,13 +12,29 @@ set -euo pipefail
 # whatever `which node` resolves to, which on macOS+nvm is often a
 # stale v20. If nvm is available, source it and switch to a current
 # Node before running `mops`.
-if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+#
+# Skip in CI: GitHub Actions sets up Node 22 via `actions/setup-node`
+# and installs `mops` globally against that Node version's prefix.
+# Sourcing nvm here would switch PATH to a *different* Node version
+# preinstalled on the runner, and the previously-installed `mops`
+# would disappear from PATH — exiting the script silently under
+# `set -e` before mops can complain. `${CI:-}` is set to `true` on
+# GitHub-hosted runners; the empty-string default keeps `set -u`
+# happy when CI is unset locally.
+if [ -z "${CI:-}" ] && [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
   # shellcheck disable=SC1091
+  # `set -u` trips on nvm.sh's (and nvm's `use` function's) unset-
+  # variable references on some installs. Disable -u through the
+  # whole nvm interaction and restore it after — restoring between
+  # the source and the `use` would still let `nvm use` abort the
+  # script before mops runs.
+  set +u
   . "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
   # Prefer 24, fall back to whatever LTS is installed. `>/dev/null`
   # because nvm prints to stdout and we don't want it polluting the
   # build log.
   nvm use 24 >/dev/null 2>&1 || nvm use --lts >/dev/null 2>&1 || true
+  set -u
 fi
 
 cd "$(dirname "$0")/.."
