@@ -1,0 +1,148 @@
+# Build + deploy both demo apps against a local icp-cli replica on every
+# PR and on pushes to main. Catches build regressions, mops resolution
+# breakage, and Motoko EOP stable-type drift (the deployed wasm has to
+# install cleanly on a fresh local canister — same code path as
+# mainnet, minus the canister id pinning).
+#
+# Both demos share the install + replica boilerplate; what differs is
+# the deploy entry point — bagel relies on icp-cli's inline build,
+# dfinsight wraps it in scripts/deploy.sh which also calls setRpOrigin
+# — and the sanity query that confirms the canister is reachable
+# post-deploy.
+name: Demos
+
+on:
+  pull_request:
+    paths:
+      - "demos/**"
+      - "src/**"
+      - ".github/workflows/demos.yml"
+  push:
+    branches: [main]
+    paths:
+      - "demos/**"
+      - "src/**"
+      - ".github/workflows/demos.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: demos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bagel:
+    name: Bagel — build + local deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: demos/bagel
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: demos/bagel/frontend/package-lock.json
+
+      - name: Install icp-cli, ic-wasm, mops
+        run: npm install --global @icp-sdk/icp-cli @icp-sdk/ic-wasm ic-mops
+
+      - name: Cache mops + moc toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            demos/bagel/.mops
+            ~/.cache/mops
+          key: mops-bagel-${{ runner.os }}-${{ hashFiles('demos/bagel/mops.toml') }}
+
+      - name: Resolve mops deps + moc toolchain
+        run: mops install
+
+      # `icp network start` is foreground when the network is
+      # `mode: managed` (per icp.yaml), so push it to the background
+      # and block on /api/v2/status before deploying. 60s is generous;
+      # cold starts settle in 5–10s on Linux runners.
+      - name: Start local replica
+        run: |
+          icp network start &
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:4943/api/v2/status >/dev/null 2>&1; then
+              echo "replica ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::local replica never came up"
+          exit 1
+
+      # `icp deploy` builds the canister (mops install + mops test +
+      # moc compile), uploads the asset wasm, installs both canisters,
+      # and runs the frontend's `npm ci && npm run build` per icp.yaml.
+      - name: Deploy to local replica
+        run: icp deploy -e local -y
+
+      # Public query, no II dependency — cheapest way to confirm the
+      # canister is installed and responsive after deploy.
+      - name: Sanity query (pool_size)
+        run: icp canister call bagel pool_size '()' -e local --query
+
+  dfinsight:
+    name: Dfinsight — build + local deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: demos/dfinsight
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: demos/dfinsight/package-lock.json
+
+      - name: Install icp-cli, ic-wasm, mops
+        run: npm install --global @icp-sdk/icp-cli @icp-sdk/ic-wasm ic-mops
+
+      - name: Cache mops + moc toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            demos/dfinsight/src/dfinsight_backend/.mops
+            ~/.cache/mops
+          key: mops-dfinsight-${{ runner.os }}-${{ hashFiles('demos/dfinsight/src/dfinsight_backend/mops.toml') }}
+
+      - name: Resolve mops deps + moc toolchain
+        run: mops install
+        working-directory: demos/dfinsight/src/dfinsight_backend
+
+      - name: Start local replica
+        run: |
+          icp network start &
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:4943/api/v2/status >/dev/null 2>&1; then
+              echo "replica ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::local replica never came up"
+          exit 1
+
+      # scripts/deploy.sh -e local mints fresh canister ids on the
+      # local replica, bakes the backend id into the frontend bundle,
+      # runs `icp deploy`, and calls `setRpOrigin` — same chain as
+      # mainnet, just with `http://<frontend>.localhost:4943` as the
+      # origin instead of `https://<frontend>.icp0.io`.
+      - name: Deploy to local replica
+        run: scripts/deploy.sh -e local
+
+      # Public query returning the bootstrap admin list seeded from
+      # init_args — confirms install + init ran cleanly. After
+      # deploy.sh's setRpOrigin call, getRpOrigin would also be a
+      # valid probe, but listAdmins is simpler to grep for in CI logs.
+      - name: Sanity query (listAdmins)
+        run: icp canister call dfinsight_backend listAdmins '()' -e local --query
