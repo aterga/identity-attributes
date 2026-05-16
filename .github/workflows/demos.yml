@@ -16,12 +16,16 @@ on:
     paths:
       - "demos/**"
       - "src/**"
+      - "mops.toml"
+      - "mops.lock"
       - ".github/workflows/demos.yml"
   push:
     branches: [main]
     paths:
       - "demos/**"
       - "src/**"
+      - "mops.toml"
+      - "mops.lock"
       - ".github/workflows/demos.yml"
   workflow_dispatch:
 
@@ -38,9 +42,9 @@ jobs:
       run:
         working-directory: demos/bagel
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
@@ -60,22 +64,11 @@ jobs:
       - name: Resolve mops deps + moc toolchain
         run: mops install
 
-      # `icp network start` is foreground when the network is
-      # `mode: managed` (per icp.yaml), so push it to the background
-      # and block on /api/v2/status before deploying. 60s is generous;
-      # cold starts settle in 5–10s on Linux runners.
+      # `-d` runs the network as a background subprocess and returns
+      # once it's bound to the gateway port — no manual readiness poll
+      # needed.
       - name: Start local replica
-        run: |
-          icp network start &
-          for i in $(seq 1 60); do
-            if curl -fs http://127.0.0.1:4943/api/v2/status >/dev/null 2>&1; then
-              echo "replica ready after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "::error::local replica never came up"
-          exit 1
+        run: icp network start -d
 
       # `icp deploy` builds the canister (mops install + mops test +
       # moc compile), uploads the asset wasm, installs both canisters,
@@ -96,9 +89,9 @@ jobs:
       run:
         working-directory: demos/dfinsight
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
