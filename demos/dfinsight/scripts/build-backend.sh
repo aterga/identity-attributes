@@ -24,6 +24,16 @@ fi
 cd "$(dirname "$0")/.."
 cd src/dfinsight_backend
 
+# `identity-attributes = "../../../.."` in mops.toml is a local-path
+# dep. mops resolves it once on install and caches the resolution
+# under `.mops/`. If the original install happened inside a git
+# worktree that's since been deleted (e.g. a Claude Code worktree
+# under `.claude/worktrees/`), the cache points at a now-nonexistent
+# path and moc fails with M0012. Wipe the cache for the local-path
+# dep before each install so it always re-resolves against this
+# checkout. Registry deps in `.mops/` are left alone.
+rm -rf .mops/identity-attributes
+
 mops install
 
 mkdir -p .build
