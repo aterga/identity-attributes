@@ -14,7 +14,13 @@ set -euo pipefail
 # Node before running `mops`.
 if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
   # shellcheck disable=SC1091
+  # `set -u` (pipefail above) trips on nvm.sh's unset-variable
+  # references — e.g. on GitHub Actions runners where nvm is
+  # preinstalled but several of its shell vars are undefined until
+  # `nvm use` runs. Disable -u while sourcing, restore it after.
+  set +u
   . "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+  set -u
   # Prefer 24, fall back to whatever LTS is installed. `>/dev/null`
   # because nvm prints to stdout and we don't want it polluting the
   # build log.
