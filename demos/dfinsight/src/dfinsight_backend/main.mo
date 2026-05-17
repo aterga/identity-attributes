@@ -59,9 +59,12 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // who steals the nonce ends up authenticating as themselves, and
   // the admin allowlist rejects them).
   //
-  // Declared `var` so the field shape matches `Migration.mo`'s
-  // output record (`var nonces : Queue<Blob>`); EOP records `var`
-  // fields and migration records have to agree on mutability.
+  // Declared `var` (rather than `let`) for stable-signature parity
+  // with lu3pu-iiaaa-aaaao-qpuhq-cai's deployed shape — that field
+  // was written as `var nonces : Queue<Blob>` by the one-shot
+  // migration in commit ed6c39f, so the new actor has to declare it
+  // the same way for the upgrade to be a structural no-op. Future
+  // installs to fresh canisters don't care about the var/let choice.
   var nonces = Queue.empty<Blob>();
 
   transient var provider = IdentityAttributesProvider({
