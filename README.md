@@ -10,12 +10,13 @@ relying-party canisters. Pairs with `@icp-sdk/auth` v7's
 
 ```toml
 [dependencies]
-identity-attributes = "0.3.0"
+identity-attributes = "0.4.0"
 core                = "2.5.0"
 ```
 
 `icp.yaml` — list the Internet Identity backend as a trusted signer
-and set the frontend origin every bundle must match:
+and configure the frontend origins every bundle must match. Optionally
+list SSO domains the canister trusts:
 
 ```yaml
 canisters:
@@ -23,8 +24,13 @@ canisters:
     settings:
       environment_variables:
         trusted_attribute_signers: "rdmx6-jaaaa-aaaaa-aaadq-cai"
-        origin: "https://your-app.icp0.io"
+        frontend_origins:          "https://your-app.icp0.io"
+        trusted_sso_domains:       "dfinity.org"
 ```
+
+`frontend_origins` is comma-separated — an app served from multiple
+domains lists each one. `trusted_sso_domains` is optional; leave it
+out and the canister accepts no `sso:*` keys.
 
 ## Usage
 
@@ -41,7 +47,7 @@ import Principal  "mo:core/Principal";
 persistent actor {
   // User profiles keyed by principal. Populated from verified II
   // attribute bundles by the callback below.
-  let profiles = Map.empty<Principal, { name : ?Text; email : ?Text }>();
+  let profiles = Map.empty<Principal, { name : ?Text; email : ?Text; sso : ?Text }>();
 
   include IdentityAttributes({
     onVerified = func(caller, attrs) {
@@ -49,7 +55,7 @@ persistent actor {
     };
   });
 
-  public query func getProfile(p : Principal) : async ?{ name : ?Text; email : ?Text } {
+  public query func getProfile(p : Principal) : async ?{ name : ?Text; email : ?Text; sso : ?Text } {
     Map.get(profiles, Principal.compare, p)
   };
 };
@@ -75,7 +81,7 @@ Frontend flow:
 
 ```motoko
 include IdentityAttributes({
-  onVerified : (Principal, { name : ?Text; email : ?Text }) -> ()
+  onVerified : (Principal, { name : ?Text; email : ?Text; sso : ?Text }) -> ()
 });
 
 // Injected on the consumer actor:
@@ -85,28 +91,42 @@ _internet_identity_sign_in_finish() : async Result<(), IdentityAttributesError>
 type IdentityAttributesError = {
   #NoAttributes;
   #MalformedCandid;
-  #MissingField        : Text;
-  #OriginNotConfigured;
-  #OriginMismatch      : { expected : Text; got : Text };
-  #Stale               : { ageNs : Nat };
+  #MissingField                 : Text;
+  #FrontendOriginsNotConfigured;
+  #FrontendOriginMismatch       : { expected : [Text]; got : Text };
+  #Stale                        : { ageNs : Nat };
   #UnknownNonce;
-  #AmbiguousAttribute  : { field : Text; sources : [Text] };
+  #AmbiguousAttribute           : { field : Text; sources : [Text] };
+  #UntrustedSsoSource           : { domain : Text };
+  #MixedSsoSources              : { ssoKeys : [Text]; otherKeys : [Text] };
 };
 ```
 
 `name` and `email` are each sourced from at most one key in the
-bundle — the unscoped key (`name` / `verified_email`) or exactly one
-OpenID-provider-scoped key (`openid:<provider>:name` /
-`openid:<provider>:verified_email`). If the bundle contains two or
-more candidates for the same field, `_internet_identity_sign_in_finish` returns
-`#AmbiguousAttribute` rather than silently picking one. `email` only
-sources from `verified_email`-suffixed keys; the unverified `email`
-key is never exposed.
+bundle, drawn from a single category:
+
+- **unscoped / openid** — `name` / `verified_email`, or
+  `openid:<provider>:name` / `openid:<provider>:verified_email`.
+  Only `verified_email`-suffixed keys are exposed; the unverified
+  `email` key is never read.
+- **sso** — `sso:<domain>:name` / `sso:<domain>:email`, where
+  `<domain>` is one of the canister's `trusted_sso_domains`. The
+  IdP behind `<domain>` attests the email, so it has no separate
+  verification flag and its own domain may be anything.
+
+If the bundle contains two or more candidates for the same field,
+`_internet_identity_sign_in_finish` returns `#AmbiguousAttribute`
+rather than silently picking one. SSO and non-SSO sources never mix
+in a single bundle — mixing yields `#MixedSsoSources`. An
+`sso:<domain>:*` key whose domain isn't trusted rejects the bundle
+with `#UntrustedSsoSource`. When the bundle's name/email came from
+SSO keys, `attrs.sso` is the matched domain; otherwise it's `null`.
 
 ## Compatibility
 
 | `mo:identity-attributes` | `@icp-sdk/auth` |
 |---|---|
+| `^0.4` | `^7` |
 | `^0.3` | `^7` |
 
 ## Demos
