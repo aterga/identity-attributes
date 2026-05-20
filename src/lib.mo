@@ -13,7 +13,7 @@ import Result     "mo:core/Result";
 /// import IdentityAttributes "mo:identity-attributes";
 ///
 /// persistent actor {
-///   transient let profiles = Map.empty<Principal, { name : ?Text; email : ?Text }>();
+///   transient let profiles = Map.empty<Principal, { name : ?Text; email : ?Text; sso : ?Text }>();
 ///
 ///   include IdentityAttributes({
 ///     onVerified = func(caller, attrs) {
@@ -29,7 +29,9 @@ import Result     "mo:core/Result";
 ///   - `_internet_identity_sign_in_finish() : async Result<(), IdentityAttributesError>` —
 ///     frontend calls this `AttributesIdentity`-wrapped after sign-in.
 ///     On success, `config.onVerified(caller, attrs)` runs with the
-///     verified principal and `{ name; email }`.
+///     verified principal and `{ name; email; sso }`. `sso` is the
+///     matched trusted SSO domain when the bundle's name/email came
+///     from `sso:<domain>:*` keys, otherwise `null`.
 ///
 /// The nonce store lives inside the mixin as a `transient` field;
 /// Motoko's `persistent actor` requires class-like state to be
@@ -37,7 +39,7 @@ import Result     "mo:core/Result";
 /// In-flight authentications will retry — nothing older than the
 /// 5-minute freshness window would have been redeemable anyway.
 mixin (config : {
-  onVerified : (Principal, { name : ?Text; email : ?Text }) -> ()
+  onVerified : (Principal, { name : ?Text; email : ?Text; sso : ?Text }) -> ()
 }) {
 
   transient let challenges = Challenges.empty();
