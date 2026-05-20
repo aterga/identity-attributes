@@ -1,21 +1,24 @@
 import Value "./Value";
+import Result "mo:core/Result";
+import Array "mo:core/Array";
 
 /// Decoded attribute bundle and the typed view consumers see.
 ///
-/// `Attributes` is the bundle as an opaque class — read entries by
-/// exact key via `getText`/`getNat`/`getBlob`/`has`. The raw ICRC-3
-/// `Value` is internal and not exposed.
+/// `Attributes` is the bundle as an opaque internal class — used by
+/// `Verify` to read `implicit:*` fields. It is not re-exported from
+/// `lib.mo`; consumers only see the typed `IdentityAttributes`.
 ///
-/// `IdentityAttributes` is the typed result of `Verify.verify`: every known
-/// provider's `name` and `verified_email` surfaced as optional fields,
-/// plus the underlying `Attributes` for any custom-scoped keys (for
-/// example, enterprise `sso:<domain>:*`) or the raw unverified `email`.
+/// `IdentityAttributes` is the typed result of `Verify.verify`: a
+/// single `name` and a single `email`, each sourced from the bundle's
+/// unscoped key or one OpenID provider's scoped key. If more than one
+/// source is present the verify fails with `#AmbiguousAttribute` rather
+/// than picking one silently.
 module {
 
   type Value = Value.Value;
 
-  /// Decoded attribute bundle. Read with `attributes.getText("...")`
-  /// etc. — exact-match only, no prefix or fuzzy matching.
+  /// Decoded attribute bundle. Internal — used by `Verify` for the
+  /// `implicit:*` reads. Not exposed to consumers.
   public class Attributes(initialEntries : [(Text, Value)]) {
 
     let entries = initialEntries;
@@ -54,34 +57,30 @@ module {
 
   /// What `Verify.verify` hands back on success.
   ///
-  /// Each scope's `name` and `verified_email` come from the bundle's
-  /// matching key (default scope = unscoped key; provider scopes =
-  /// `openid:<provider-url>:<key>`). Fields are `null` when the FE
-  /// didn't request that scope's keys or Internet Identity didn't surface them.
+  /// `name` and `email` are sourced from a single matching key in the
+  /// bundle — either the unscoped variant (`name` / `verified_email`)
+  /// or exactly one OpenID-provider-scoped variant
+  /// (`openid:<provider>:name` / `openid:<provider>:verified_email`).
+  /// If the bundle contains more than one source for the same field,
+  /// `Verify.verify` returns `#AmbiguousAttribute` instead of choosing
+  /// one. Either field is `null` when the bundle carries no source for
+  /// it.
   ///
-  /// **No raw `email` field by design.** The unverified `email` key
-  /// is user-supplied — Internet Identity doesn't check it — so exposing it
-  /// alongside the verified variants would make the unsafe choice as
-  /// easy as the safe one. If you genuinely need it (mailing-list
-  /// signup, contact display, never gating access), reach in
-  /// explicitly via `attributes.getText("email")`.
-  ///
-  /// For Microsoft, the `{tid}` in the URL is *literal* — that's what
-  /// Internet Identity actually emits, not a placeholder for a tenant GUID.
-  ///
-  /// For enterprise SSO keys outside the four named providers, read
-  /// directly from `attributes` — for example,
-  /// `attributes.getText("sso:dfinity.org:verified_email")`.
+  /// **`email` only sources from `verified_email`-suffixed keys.** The
+  /// unverified `email` key is user-supplied — Internet Identity
+  /// doesn't check it — so it never lands here. There is no escape
+  /// hatch; bundles that only carry an unverified `email` will yield
+  /// `email = null`.
   public type IdentityAttributes = {
-    name                     : ?Text;
-    verified_email           : ?Text;
-    google_name              : ?Text;
-    google_verified_email    : ?Text;
-    apple_name               : ?Text;
-    apple_verified_email     : ?Text;
-    microsoft_name           : ?Text;
-    microsoft_verified_email : ?Text;
-    attributes               : Attributes;
+    name  : ?Text;
+    email : ?Text;
+  };
+
+  /// The conflicting source keys when a single logical field has more
+  /// than one source in the bundle.
+  public type AmbiguousAttribute = {
+    field   : Text;
+    sources : [Text];
   };
 
   /// Construct an `Attributes` from a decoded top-level `#Map`. Returns
@@ -90,26 +89,52 @@ module {
     switch value { case (#Map entries) ?Attributes(entries); case _ null };
   };
 
-  /// Populate `IdentityAttributes` from a decoded bundle. Pulls each known
-  /// provider's keys with exact-match — an unscoped `name` is *not* the
-  /// same key as `openid:google:name`, so they end up in different
-  /// fields.
-  public func asIdentityAttributes(attributes : Attributes) : IdentityAttributes {
-    let googlePrefix    = "openid:https://accounts.google.com:";
-    let applePrefix     = "openid:https://appleid.apple.com:";
-    // `{tid}` is a *literal* part of the URL Internet Identity emits.
-    let microsoftPrefix = "openid:https://login.microsoftonline.com/{tid}/v2.0:";
-    {
-      name                     = attributes.getText("name");
-      verified_email           = attributes.getText("verified_email");
-      google_name              = attributes.getText(googlePrefix # "name");
-      google_verified_email    = attributes.getText(googlePrefix # "verified_email");
-      apple_name               = attributes.getText(applePrefix # "name");
-      apple_verified_email     = attributes.getText(applePrefix # "verified_email");
-      microsoft_name           = attributes.getText(microsoftPrefix # "name");
-      microsoft_verified_email = attributes.getText(microsoftPrefix # "verified_email");
-      attributes;
-    }
+  // OpenID provider prefixes plus the empty unscoped prefix. `{tid}` in
+  // the Microsoft URL is a *literal* part of the key Internet Identity
+  // emits, not a placeholder for a tenant GUID.
+  let openidPrefixes : [Text] = [
+    "",
+    "openid:https://accounts.google.com:",
+    "openid:https://appleid.apple.com:",
+    "openid:https://login.microsoftonline.com/{tid}/v2.0:",
+  ];
+
+  // Walk each prefix, collect the matching keys that have a value, and
+  // either return `#ok null` (no source), `#ok (?value)` (one source),
+  // or `#err { field; sources }` (two or more).
+  func resolveField(attributes : Attributes, field : Text, suffix : Text)
+    : Result.Result<?Text, AmbiguousAttribute>
+  {
+    var value : ?Text = null;
+    var sources : [Text] = [];
+    for (prefix in openidPrefixes.vals()) {
+      let key = prefix # suffix;
+      switch (attributes.getText(key)) {
+        case null {};
+        case (?v) {
+          value := ?v;
+          sources := Array.concat<Text>(sources, [key]);
+        };
+      };
+    };
+    if (sources.size() > 1) #err({ field; sources }) else #ok(value)
+  };
+
+  /// Populate `IdentityAttributes` from a decoded bundle. Returns
+  /// `#err` if either `name` or `email` is sourced from more than one
+  /// key in the bundle.
+  public func asIdentityAttributes(attributes : Attributes)
+    : Result.Result<IdentityAttributes, AmbiguousAttribute>
+  {
+    let name = switch (resolveField(attributes, "name", "name")) {
+      case (#err e) return #err(e);
+      case (#ok v)  v;
+    };
+    let email = switch (resolveField(attributes, "email", "verified_email")) {
+      case (#err e) return #err(e);
+      case (#ok v)  v;
+    };
+    #ok({ name; email })
   };
 
 };

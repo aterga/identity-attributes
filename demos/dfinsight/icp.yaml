@@ -31,11 +31,19 @@ canisters:
       # it reaches the canister and `II.verify<system>` returns
       # `#NoAttributes`.
       #
-      # Comma-separated list (parsed by `mo:core/CallerAttributes`).
+      # `trusted_attribute_signers` is a comma-separated list (parsed by
+      # `mo:core/CallerAttributes`).
       #   - `rdmx6-jaaaa-aaaaa-aaadq-cai` — Internet Identity production
       #   - `fgte5-ciaaa-aaaad-aaatq-cai` — Internet Identity beta
+      #
+      # `origin` is the frontend URL `mo:identity-attributes` matches
+      # against `implicit:origin` in every bundle. Defaults to the local
+      # Vite dev server here; `scripts/deploy.sh` overrides it with the
+      # real `.icp0.io` frontend URL on mainnet (via `icp canister
+      # settings update --add-environment-variable origin=…`).
       environment_variables:
         trusted_attribute_signers: rdmx6-jaaaa-aaaaa-aaadq-cai,fgte5-ciaaa-aaaad-aaatq-cai
+        origin: http://localhost:5173
 
     # Bootstrap admin allowlist, passed to the actor class on first
     # install. Names must match the verified `sso:dfinity.org:name`
@@ -44,12 +52,6 @@ canisters:
     # canister's current list. To change the list on a running canister
     # use `addAdmin` / `removeAdmin` from the admin panel.
     init_args: '(vec { "Arshavir Ter-Gabrielyan"; "Thomas Gladdines" })'
-
-    # `rpOrigin` is a separate stable `var` with a controller-gated
-    # `setRpOrigin` setter (see `main.mo`). `scripts/deploy.sh` calls
-    # it once after the frontend canister id is known. The
-    # Authorization-tier verify rejects bundles whose `implicit:origin`
-    # doesn't match `rpOrigin`.
 
   # --- Dfinsight frontend — Vite+TypeScript app served from an asset canister.
   - name: dfinsight_frontend

@@ -1,69 +1,60 @@
-import Attributes "./Internal/Attributes";
 import Challenges "./Internal/Challenges";
 import Verify     "./Internal/Verify";
+import Principal  "mo:core/Principal";
 import Result     "mo:core/Result";
 
-/// Verify Internet Identity attribute bundles in relying-party canisters.
-/// Pairs with `@icp-sdk/auth` v7's `requestAttributes` / `AttributesIdentity`.
+/// Mixin that injects the two canister methods needed to verify
+/// Internet Identity attribute bundles into your actor. Pairs with
+/// `@icp-sdk/auth` v7's `requestAttributes` / `AttributesIdentity` flow.
 ///
-/// `IdentityAttributesProvider` captures `origin` and a reference to
-/// your `Nonces` record at construction time. The provider holds no
-/// state of its own — it just mutates the nonces you passed in.
+/// Usage:
 ///
-/// Motoko requires class instances be declared `transient` in a
-/// `persistent actor`, which is fine here: the provider is rebuilt on
-/// every upgrade and re-binds to the same `nonces` record (the nonces
-/// themselves survive because they're a stable `let`).
-module {
+/// ```motoko
+/// import IdentityAttributes "mo:identity-attributes";
+///
+/// persistent actor {
+///   transient let profiles = Map.empty<Principal, { name : ?Text; email : ?Text }>();
+///
+///   include IdentityAttributes({
+///     onVerified = func(caller, attrs) {
+///       Map.add(profiles, Principal.compare, caller, attrs)
+///     };
+///   });
+/// };
+/// ```
+///
+/// Injected methods:
+///   - `_internet_identity_sign_in_start() : async Blob` — frontend calls this
+///     anonymously before sign-in to get a fresh nonce.
+///   - `_internet_identity_sign_in_finish() : async Result<(), IdentityAttributesError>` —
+///     frontend calls this `AttributesIdentity`-wrapped after sign-in.
+///     On success, `config.onVerified(caller, attrs)` runs with the
+///     verified principal and `{ name; email }`.
+///
+/// The nonce store lives inside the mixin as a `transient` field;
+/// Motoko's `persistent actor` requires class-like state to be
+/// transient, so the store is recreated empty on every upgrade.
+/// In-flight authentications will retry — nothing older than the
+/// 5-minute freshness window would have been redeemable anyway.
+mixin (config : {
+  onVerified : (Principal, { name : ?Text; email : ?Text }) -> ()
+}) {
 
-  public type Nonces             = Challenges.Store;
-  public type IdentityAttributes      = Attributes.IdentityAttributes;
-  public type Attributes              = Attributes.Attributes;
-  public type IdentityAttributesError = Verify.Error;
+  transient let challenges = Challenges.empty();
 
-  public type Config = {
-
-    /// The frontend origin every bundle must claim in `implicit:origin`.
-    /// Mismatch → `#OriginMismatch`. Typically the exact `.icp0.io` URL
-    /// of your asset canister (no trailing slash). Internet Identity
-    /// rewrites `.ic0.app` loads to the canonical `.icp0.io` form before
-    /// signing, so list the `.icp0.io` form here even if users arrive
-    /// on `.ic0.app`.
-    origin : Text;
-
-    /// The nonce store the provider should mutate.
-    nonces : Nonces;
+  public shared func _internet_identity_sign_in_start() : async Blob {
+    await Challenges.issue<system>(challenges)
   };
 
-  public class IdentityAttributesProvider(config : Config) {
-
-    /// Mint a fresh single-use nonce, append it to the captured
-    /// `nonces`, return the blob. The frontend pre-fetches this before
-    /// sign-in and passes it to
-    /// `authClient.requestAttributes({ nonce, keys })`.
-    public func nonce<system>() : async Blob {
-      await Challenges.issue<system>(config.nonces)
-    };
-
-    /// Verify the attribute bundle attached to the current call,
-    /// consuming the matching nonce on success.
-    ///
-    /// On `#ok` you can trust:
-    ///
-    ///   1. The bundle was signed by a principal in your
-    ///      `trusted_attribute_signers` env var (enforced by
-    ///      `mo:core/CallerAttributes`; this layer traps if not).
-    ///   2. `implicit:origin` matches the configured `origin`.
-    ///   3. `implicit:nonce` is one *this canister* issued via
-    ///      `nonce`, single-use, not yet redeemed.
-    ///   4. `implicit:issued_at_timestamp_ns` is within 5 minutes of now.
-    ///
-    /// On `#err`, nothing about the bundle is trustworthy.
-    public func get<system>()
-      : Result.Result<IdentityAttributes, IdentityAttributesError>
-    {
-      Verify.verify<system>({ origin = config.origin; store = config.nonces })
-    };
+  public shared ({ caller }) func _internet_identity_sign_in_finish()
+    : async Result.Result<(), Verify.Error>
+  {
+    switch (Verify.verify<system>(challenges)) {
+      case (#err e) #err e;
+      case (#ok attrs) {
+        config.onVerified(caller, attrs);
+        #ok
+      };
+    }
   };
-
-};
+}

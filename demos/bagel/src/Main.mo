@@ -35,25 +35,18 @@ import Result     "mo:core/Result";
 /// of register — an attacker who steals one ends up registering themselves.
 persistent actor Bagel {
 
-  // The origin where this app is hosted. As of the latest II release,
-  // II puts this canonical `.icp0.io` form into the bundle's
+  // The origin where this app is hosted is read by
+  // `mo:identity-attributes` from the `origin` canister env var,
+  // configured in `icp.yaml` under
+  // `canisters[].settings.environment_variables`. As of the latest II
+  // release, II puts the canonical `.icp0.io` form into the bundle's
   // `implicit:origin` regardless of which domain the user actually
-  // loaded the page from.
-  //
-  // `transient` is critical — in a `persistent actor`, regular `let`
-  // bindings are evaluated on the *initial* install only, and their
-  // values are preserved across upgrades. `transient` re-evaluates the
-  // right-hand side on every upgrade so source-level changes actually
-  // take effect.
-  transient let rpOrigin : Text      = "https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io";
+  // loaded the page from, so list the `.icp0.io` form in the env var.
   transient let allowedDomain : Text = "dfinity.org";
 
   let nonces = Queue.empty<Blob>();
 
-  transient let provider = IdentityAttributesProvider({
-    origin = rpOrigin;
-    nonces;
-  });
+  transient let provider = IdentityAttributesProvider({ nonces });
   // Principals known to belong to DFINITY employees, populated by
   // `register()` after the bundle has been fully verified. Subsequent
   // calls (join_round, reset) just look up against this map — no
