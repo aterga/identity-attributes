@@ -23,9 +23,8 @@ canisters:
           commands:
             - mops install
             # Run unit tests before building. A red test fails the
-            # deploy, surfacing regressions like the rpOrigin transient
-            # mishap (where `let` defaults to stable in `persistent
-            # actor`) before the wasm goes anywhere near a canister.
+            # deploy, surfacing regressions before the wasm goes
+            # anywhere near a canister.
             - mops test
             - $(mops toolchain bin moc) src/Main.mo $(mops sources) -o "$ICP_WASM_OUTPUT_PATH"
 
@@ -35,13 +34,21 @@ canisters:
       # it reaches the canister and `II.verify<system>` returns
       # `#NoAttributes`.
       #
-      # Comma-separated list (parsed by `mo:core/CallerAttributes`).
+      # `trusted_attribute_signers` is a comma-separated list (parsed by
+      # `mo:core/CallerAttributes`).
       #   - `rdmx6-jaaaa-aaaaa-aaadq-cai` — Internet Identity production
       #   - `fgte5-ciaaa-aaaad-aaatq-cai` — Internet Identity beta
       # Both are listed so the frontend's II-instance toggle can flip
       # between them without redeploying the canister.
+      #
+      # `origin` is the frontend URL `mo:identity-attributes` matches
+      # against `implicit:origin` in every bundle. This canister is
+      # pinned to `ufh7l-hiaaa-aaaad-agnza-cai.icp0.io` on mainnet; for
+      # a fresh deploy override it with `icp canister settings update
+      # bagel --add-environment-variable origin=…`.
       environment_variables:
         trusted_attribute_signers: rdmx6-jaaaa-aaaaa-aaadq-cai,fgte5-ciaaa-aaaad-aaatq-cai
+        origin: https://ufh7l-hiaaa-aaaad-agnza-cai.icp0.io
 
   # --- Bagel frontend — Vite+TypeScript app served from an asset canister.
   - name: bagel_frontend

@@ -1,8 +1,13 @@
 import Random "mo:core/Random";
-import Queue  "mo:core/Queue";
+import Map    "mo:core/Map";
+import Blob   "mo:core/Blob";
+import Time   "mo:core/Time";
+import Int    "mo:core/Int";
+import Iter   "mo:core/Iter";
 import Result "mo:core/Result";
 
-/// Single-use canister-issued nonces, held in a FIFO `Queue<Blob>`.
+/// Single-use canister-issued nonces, held in a `Map<Blob, Int>` keyed
+/// by nonce bytes with the issue timestamp as the value.
 ///
 /// ## Why nonces are canister-issued
 ///
@@ -12,18 +17,26 @@ import Result "mo:core/Result";
 /// distinguish a fresh user flow from an attacker replaying or
 /// laundering an old bundle. Mint here, store here, consume here.
 ///
-/// ## No per-entry expiry
+/// ## Pruning
 ///
-/// We don't track when each nonce was minted — the bundle's own
-/// `implicit:issued_at_timestamp_ns` field gives the verifier a
-/// 5-minute freshness window, so stale nonces can't be redeemed even
-/// if they're still sitting in the store.
+/// `issue` and `consume` both drop entries older than `expiryNs` before
+/// touching the store, so memory stays bounded even if no one calls
+/// `consume`. On top of that, `issue` evicts the oldest entry when the
+/// store is already at `maxTotal` — protects against a runaway frontend
+/// minting nonces but never using them.
 ///
-/// ## Memory bounds
+/// The lib doesn't refuse a `consume` on an expired entry — the entry
+/// is gone by then and the call returns `#UnknownNonce`, which is what
+/// the consumer wants anyway. The bundle's own
+/// `implicit:issued_at_timestamp_ns` freshness check in `Verify` is
+/// the authoritative stale-bundle gate.
 ///
-/// Capped at `maxTotal` entries. On overflow the oldest is evicted via
-/// `Queue.popFront` (O(1)). In legitimate use that's an abandoned
-/// flow. Successful `consume` removes the matched entry.
+/// ## Upgrade behavior
+///
+/// The store lives inside the `transient` `IdentityAttributesProvider`,
+/// so it's recreated empty on every upgrade. In-flight authentications
+/// will just need to retry — the `expiryNs` window means anything that
+/// would have been redeemable was about to time out anyway.
 ///
 /// ## Why we don't key by `Principal`
 ///
@@ -35,34 +48,80 @@ import Result "mo:core/Result";
 /// nonce only manages to register themselves.
 module {
 
-  /// Upper bound on store size. FIFO eviction once we hit this.
+  /// Upper bound on store size before `issue` starts evicting.
   public let maxTotal : Nat = 4096;
 
-  public type Store = Queue.Queue<Blob>;
+  /// Per-entry lifetime. Matches `Verify`'s bundle freshness window —
+  /// nothing older than this could be redeemed anyway.
+  public let expiryNs : Nat = 300_000_000_000;
+
+  public type Store = Map.Map<Blob, Int>;
 
   public type ConsumeError = { #UnknownNonce };
 
-  /// Mint a fresh 32-byte random nonce, remember it, return it.
+  /// Fresh empty store. Use this when constructing the provider.
+  public func empty() : Store = Map.empty<Blob, Int>();
+
+  /// Mint a fresh 32-byte random nonce, prune expired entries, evict
+  /// the oldest entry if the store is already at capacity, then add
+  /// the new nonce with the current timestamp. Returns the nonce.
   public func issue<system>(store : Store) : async Blob {
     let nonce = await Random.blob();
-    if (Queue.size(store) >= maxTotal) {
-      ignore Queue.popFront(store);
+    let nowNs = Int.abs(Time.now());
+    pruneExpired(store, nowNs);
+    if (Map.size(store) >= maxTotal) {
+      evictOldest(store);
     };
-    Queue.pushBack(store, nonce);
+    Map.add(store, Blob.compare, nonce, nowNs);
     nonce
   };
 
-  /// Find and remove the entry matching `nonce`. Queue has no
-  /// remove-at-position; rebuild via filter + clear + push.
+  /// Prune expired entries, then look up `nonce` and remove it in one
+  /// shot. Returns `#err(#UnknownNonce)` if the entry isn't present —
+  /// either it was never issued by this canister, was already
+  /// consumed, or expired and got pruned.
   public func consume(store : Store, nonce : Blob) : Result.Result<(), ConsumeError> {
-    var found = false;
-    let kept = Queue.filter<Blob>(store, func entry {
-      if (not found and entry == nonce) { found := true; false } else true
-    });
-    if (not found) return #err(#UnknownNonce);
-    Queue.clear(store);
-    Queue.forEach<Blob>(kept, func entry = Queue.pushBack(store, entry));
-    #ok
+    let nowNs = Int.abs(Time.now());
+    pruneExpired(store, nowNs);
+    switch (Map.take(store, Blob.compare, nonce)) {
+      case (?_) #ok;
+      case null #err(#UnknownNonce);
+    }
+  };
+
+  // Drop every entry whose age exceeds `expiryNs`. Two-pass because
+  // `mo:core/Map` doesn't expose an in-place filter — collect the
+  // expired keys first, then remove them.
+  func pruneExpired(store : Store, nowNs : Int) {
+    let expired = Iter.toArray(
+      Iter.map<(Blob, Int), Blob>(
+        Iter.filter<(Blob, Int)>(
+          Map.entries(store),
+          func((_, issuedAt)) = nowNs - issuedAt > expiryNs,
+        ),
+        func((nonce, _)) = nonce,
+      )
+    );
+    for (nonce in expired.vals()) {
+      Map.remove(store, Blob.compare, nonce);
+    };
+  };
+
+  // Remove the entry with the smallest `issuedAt`. Linear scan — only
+  // happens on `issue` when the store is at `maxTotal`, so the cost is
+  // bounded by `maxTotal` and only hit in degenerate cases.
+  func evictOldest(store : Store) {
+    var oldest : ?(Blob, Int) = null;
+    for (entry in Map.entries(store)) {
+      switch oldest {
+        case null oldest := ?entry;
+        case (?(_, oldT)) if (entry.1 < oldT) oldest := ?entry;
+      };
+    };
+    switch oldest {
+      case (?(nonce, _)) Map.remove(store, Blob.compare, nonce);
+      case null {};
+    };
   };
 
 };

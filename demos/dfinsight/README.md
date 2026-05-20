@@ -99,11 +99,13 @@ The script does the two things a one-shot `icp deploy -e ic` can't:
    right backend id into the frontend bundle. Without this, the bundle
    silently falls back to a local-replica id and every backend call
    fails on mainnet.
-2. **Calls `setRpOrigin`** on the backend with
-   `https://<frontend-id>.icp0.io` once both ids are known. `rpOrigin`
-   is a stable `var` inside the actor — set once, persists across
-   upgrades. Mismatch produces `#OriginMismatch` from
-   `mo:identity-attributes` on every admin verify.
+2. **Sets the backend's `origin` env var** to
+   `https://<frontend-id>.icp0.io` once both ids are known, via
+   `icp canister settings update dfinsight_backend
+   --add-environment-variable origin=…`. `mo:identity-attributes` reads
+   this env var on every admin verify; mismatch produces
+   `#OriginMismatch` and an unset env var produces
+   `#OriginNotConfigured`.
 
 The on-chain canister ids are pinned in
 `.icp/data/mappings/ic.ids.json` — that file binds the canister names

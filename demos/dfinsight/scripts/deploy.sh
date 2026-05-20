@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Two-pass deploy that wires the backend canister id into the frontend
-# bundle, then calls `setRpOrigin` on the backend with the frontend URL.
+# bundle, then sets the backend's `origin` env var to the frontend URL.
 #
 # Usage:
 #   scripts/deploy.sh                          # mainnet (default)
@@ -14,9 +14,11 @@ set -euo pipefail
 # `CANISTER_ID_DFINSIGHT_BACKEND` unset and `config.ts` falls back to a
 # stale local id. We work around that by minting both canister ids up
 # front, then handing them to `icp deploy` via the env. The
-# `setRpOrigin` call is needed because `rpOrigin` is a stable `var`
-# inside the actor — it has to be set once after the frontend canister
-# id is known so the Authorization-tier verify accepts admin sign-ins.
+# `--add-environment-variable origin=…` step is needed because
+# `mo:identity-attributes` reads the expected frontend origin from the
+# canister's `origin` env var — it has to be set to the real frontend
+# URL after the first deploy mints the frontend canister id, so the
+# Authorization-tier verify accepts admin sign-ins.
 
 ENV=ic
 PASSTHROUGH=()
@@ -75,8 +77,9 @@ CANISTER_ID_DFINSIGHT_BACKEND="$BACKEND_ID" \
 VITE_IC_HOST="$IC_HOST" \
   icp deploy -e "$ENV" -y "${PASSTHROUGH[@]}"
 
-log "[5/6] Calling dfinsight_backend.setRpOrigin(\"$ORIGIN\")"
-icp canister call dfinsight_backend setRpOrigin "(\"$ORIGIN\")" \
+log "[5/6] Setting dfinsight_backend env var: origin=$ORIGIN"
+icp canister settings update dfinsight_backend \
+  --add-environment-variable "origin=$ORIGIN" \
   -e "$ENV" "${PASSTHROUGH[@]}"
 
 log "[6/6] Done."

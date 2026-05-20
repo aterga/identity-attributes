@@ -14,7 +14,8 @@ identity-attributes = "0.3.0"
 core                = "2.5.0"
 ```
 
-`icp.yaml` — list the Internet Identity backend as a trusted signer:
+`icp.yaml` — list the Internet Identity backend as a trusted signer
+and set the frontend origin every bundle must match:
 
 ```yaml
 canisters:
@@ -22,76 +23,85 @@ canisters:
     settings:
       environment_variables:
         trusted_attribute_signers: "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        origin: "https://your-app.icp0.io"
 ```
 
 ## Usage
 
+The library is a mixin — `include` it inside your `persistent actor`
+and it injects the two canister methods the frontend talks to. Your
+only job is the `onVerified` callback that runs once the bundle has
+been verified.
+
 ```motoko
-import { IdentityAttributesProvider } "mo:identity-attributes";
-import Queue "mo:core/Queue";
+import IdentityAttributes "mo:identity-attributes";
+import Map        "mo:core/Map";
+import Principal  "mo:core/Principal";
 
 persistent actor {
-  let nonces = Queue.empty<Blob>();
+  // User profiles keyed by principal. Populated from verified II
+  // attribute bundles by the callback below.
+  let profiles = Map.empty<Principal, { name : ?Text; email : ?Text }>();
 
-  transient let identityAttributesProvider = IdentityAttributesProvider({
-    origin = "https://your-app.icp0.io";
-    nonces;
+  include IdentityAttributes({
+    onVerified = func(caller, attrs) {
+      Map.add(profiles, Principal.compare, caller, attrs)
+    };
   });
 
-  // Pre-fetched anonymously by the frontend before Internet Identity sign-in.
-  public shared func authStart() : async Blob {
-    await identityAttributesProvider.nonce<system>()
-  };
-
-  // Called authenticated (AttributesIdentity-wrapped) after sign-in.
-  public shared func authFinish() : async () {
-    let #ok identityAttributes = identityAttributesProvider.get<system>() else return;
-    // For example, update the caller's profile with name and verified_email.
+  public query func getProfile(p : Principal) : async ?{ name : ?Text; email : ?Text } {
+    Map.get(profiles, Principal.compare, p)
   };
 };
 ```
+
+The `include` call adds two `public shared` methods to your actor:
+
+```
+_internet_identity_sign_in_start()  : async Blob
+_internet_identity_sign_in_finish() : async Result<(), IdentityAttributesError>
+```
+
+Frontend flow:
+
+1. Call `_internet_identity_sign_in_start` anonymously before sign-in to get a 32-byte
+   nonce.
+2. Pass it to `authClient.requestAttributes({ nonce, keys: ["name", "verified_email"] })`.
+3. Wrap the resulting `SignedAttributes` into an `AttributesIdentity`
+   and call `_internet_identity_sign_in_finish`. On `#ok` the actor's `onVerified`
+   callback has already run; the FE can now call your other methods.
 
 ## API
 
 ```motoko
-IdentityAttributesProvider(config)         : IdentityAttributesProvider
+include IdentityAttributes({
+  onVerified : (Principal, { name : ?Text; email : ?Text }) -> ()
+});
 
-// Methods on the IdentityAttributesProvider instance:
-identityAttributesProvider.nonce<system>() : async Blob
-identityAttributesProvider.get<system>()   : Result<IdentityAttributes, IdentityAttributesError>
-
-type Nonces = Queue.Queue<Blob>;
-
-type Config = {
-  origin : Text;
-  nonces : Nonces;
-};
-
-type IdentityAttributes = {
-  name                     : ?Text;
-  verified_email           : ?Text;
-  google_name              : ?Text;
-  google_verified_email    : ?Text;
-  apple_name               : ?Text;
-  apple_verified_email     : ?Text;
-  microsoft_name           : ?Text;
-  microsoft_verified_email : ?Text;
-  attributes               : Attributes;
-};
+// Injected on the consumer actor:
+_internet_identity_sign_in_start()  : async Blob
+_internet_identity_sign_in_finish() : async Result<(), IdentityAttributesError>
 
 type IdentityAttributesError = {
   #NoAttributes;
   #MalformedCandid;
-  #MissingField   : Text;
-  #OriginMismatch : { expected : Text; got : Text };
-  #Stale          : { ageNs : Nat };
+  #MissingField        : Text;
+  #OriginNotConfigured;
+  #OriginMismatch      : { expected : Text; got : Text };
+  #Stale               : { ageNs : Nat };
   #UnknownNonce;
+  #AmbiguousAttribute  : { field : Text; sources : [Text] };
 };
 ```
 
-`identityAttributes.attributes` has `getText(key)`, `getNat(key)`,
-`getBlob(key)`, `has(key)` for keys outside the typed surface —
-implicit fields, enterprise SSO (`sso:<domain>:*`), the raw `email`.
+`name` and `email` are each sourced from at most one key in the
+bundle — the unscoped key (`name` / `verified_email`) or exactly one
+OpenID-provider-scoped key (`openid:<provider>:name` /
+`openid:<provider>:verified_email`). If the bundle contains two or
+more candidates for the same field, `_internet_identity_sign_in_finish` returns
+`#AmbiguousAttribute` rather than silently picking one. `email` only
+sources from `verified_email`-suffixed keys; the unverified `email`
+key is never exposed.
 
 ## Compatibility
 

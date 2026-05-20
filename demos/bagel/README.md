@@ -202,10 +202,14 @@ so `icp deploy` sets it for you — no separate management-canister call.
 
 ## Deploying to mainnet
 
-1. **Pick the frontend origin.** Edit [`src/Main.mo:23`](src/Main.mo:23)
-   (`rpOrigin`) to whatever your deployed frontend will serve from —
-   either `https://<bagel_frontend-id>.icp0.io` or your custom domain.
-   This is checked against `implicit:origin` and has to match exactly.
+1. **Pick the frontend origin.** Edit the `origin` env var under
+   `canisters[bagel].settings.environment_variables` in
+   [`icp.yaml`](icp.yaml) to whatever your deployed frontend will serve
+   from — either `https://<bagel_frontend-id>.icp0.io` or your custom
+   domain. This is checked against `implicit:origin` and has to match
+   exactly. On a deployed canister you can also change it without a
+   redeploy via `icp canister settings update bagel
+   --add-environment-variable origin=…`.
 
 2. **Create the canisters** (you'll need a cycles wallet — see
    [the icp-cli tokens/cycles docs](https://internetcomputer.org/docs/building-apps/getting-started/tokens-and-cycles)).

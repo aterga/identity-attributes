@@ -28,15 +28,14 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
 
   // --------------------------------------------------------------- config --
 
-  // Origin of *this* dapp (the relying party) — must match the
-  // `implicit:origin` field id.ai bakes into attribute bundles.
-  //
-  // Defaults to the local Vite dev server. For mainnet, the controller
-  // calls `setRpOrigin("https://<frontend-id>.icp0.io")` once after the
-  // first deploy mints the frontend canister id. Stable, so it
-  // survives upgrades. Mismatch produces `#OriginMismatch` from
-  // `mo:identity-attributes` on every admin verify.
-  var rpOrigin : Text = "http://localhost:5173";
+  // The dapp's frontend origin (the value `id.ai` bakes into
+  // `implicit:origin`) is read by `mo:identity-attributes` from the
+  // `origin` canister environment variable, configured under
+  // `canisters[].settings.environment_variables` in `icp.yaml` for local
+  // installs and via `icp canister settings update dfinsight_backend
+  // --add-environment-variable origin=https://<frontend-id>.icp0.io`
+  // for mainnet (called by `scripts/deploy.sh` once the frontend
+  // canister id is minted).
 
   // After a successful verify we keep the principal marked as "trusted
   // admin" for this long — so a single sign-in covers a normal admin
@@ -67,10 +66,7 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
   // installs to fresh canisters don't care about the var/let choice.
   var nonces = Queue.empty<Blob>();
 
-  transient var provider = IdentityAttributesProvider({
-    origin = rpOrigin;
-    nonces;
-  });
+  transient let provider = IdentityAttributesProvider({ nonces });
 
   var nextIssueId : Nat = 0;
 
@@ -418,24 +414,6 @@ persistent actor class Dfinsight(initialAdmins : [Text]) {
     admins := Array.filter<Text>(admins, func(a) = a != trimmed);
     #ok()
   };
-
-  // -------------------------------------------------- controller API --
-
-  /// Set the relying-party origin. Must be the exact frontend URL
-  /// (e.g. `https://<frontend-id>.icp0.io`, no trailing slash) that
-  /// id.ai will see in the browser at admin sign-in time. Restricted
-  /// to canister controllers — typical mainnet flow is one call right
-  /// after `icp deploy -e ic` mints the frontend canister id.
-  public shared ({ caller }) func setRpOrigin(origin : Text) : async Result.Result<(), Text> {
-    if (not Principal.isController(caller)) return #err("not a controller");
-    rpOrigin := origin;
-    provider := IdentityAttributesProvider({ origin = rpOrigin; nonces });
-    #ok()
-  };
-
-  /// Reads back the current origin so a deploy script can confirm the
-  /// `setRpOrigin` call landed before declaring the deploy done.
-  public query func getRpOrigin() : async Text { rpOrigin };
 
   // ------------------------------------------------------- helpers --
 

@@ -7,8 +7,7 @@
 // any bagel canister code (no import of `Main.mo`, no actor
 // instantiation), so a regression in the backend wouldn't be caught
 // here. Replace it with real tests when bagel grows them (pool
-// fairness across draws, attribute-bundle expiry handling,
-// rpOrigin stable-field upgrade compatibility, etc.).
+// fairness across draws, attribute-bundle expiry handling, etc.).
 do {
   assert 1 + 1 == 2;
 };
