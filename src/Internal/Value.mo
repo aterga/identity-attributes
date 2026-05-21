@@ -7,18 +7,18 @@
 /// See: https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-3/README.md
 module {
   public type Value = {
-    #Nat   : Nat;
-    #Int   : Int;
-    #Blob  : Blob;
-    #Text  : Text;
+    #Nat : Nat;
+    #Int : Int;
+    #Blob : Blob;
+    #Text : Text;
     #Array : [Value];
-    #Map   : [(Text, Value)];
+    #Map : [(Text, Value)]
   };
 
   /// Candid-decode an ICRC-3 `Value` blob. Returns `null` if the bytes don't
   /// match the expected type.
   public func decode(blob : Blob) : ?Value {
-    let decoded : ?Value = from_candid(blob);
+    let decoded : ?Value = from_candid (blob);
     decoded
-  };
-};
+  }
+}
