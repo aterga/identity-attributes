@@ -1,7 +1,7 @@
 import Challenges "./Internal/Challenges";
-import Verify     "./Internal/Verify";
-import Principal  "mo:core/Principal";
-import Result     "mo:core/Result";
+import Verify "./Internal/Verify";
+import Principal "mo:core/Principal";
+import Result "mo:core/Result";
 
 /// Mixin that injects the two canister methods needed to verify
 /// Internet Identity attribute bundles into your actor. Pairs with
@@ -38,9 +38,11 @@ import Result     "mo:core/Result";
 /// transient, so the store is recreated empty on every upgrade.
 /// In-flight authentications will retry — nothing older than the
 /// 5-minute freshness window would have been redeemable anyway.
-mixin (config : {
-  onVerified : (Principal, { name : ?Text; email : ?Text; sso : ?Text }) -> ()
-}) {
+mixin(
+  config : {
+    onVerified : (Principal, { name : ?Text; email : ?Text; sso : ?Text }) -> ()
+  }
+) {
 
   transient let challenges = Challenges.empty();
 
@@ -48,15 +50,13 @@ mixin (config : {
     await Challenges.issue<system>(challenges)
   };
 
-  public shared ({ caller }) func _internet_identity_sign_in_finish()
-    : async Result.Result<(), Verify.Error>
-  {
+  public shared ({ caller }) func _internet_identity_sign_in_finish() : async Result.Result<(), Verify.Error> {
     switch (Verify.verify<system>(challenges)) {
       case (#err e) #err e;
       case (#ok attrs) {
         config.onVerified(caller, attrs);
         #ok
-      };
+      }
     }
-  };
+  }
 }

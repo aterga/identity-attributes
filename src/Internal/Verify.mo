@@ -1,12 +1,12 @@
 import CallerAttributes "mo:core/CallerAttributes";
 import Runtime "mo:core/Runtime";
-import Time   "mo:core/Time";
-import Int    "mo:core/Int";
+import Time "mo:core/Time";
+import Int "mo:core/Int";
 import Result "mo:core/Result";
-import Text   "mo:core/Text";
-import Iter   "mo:core/Iter";
-import Array  "mo:core/Array";
-import Value      "./Value";
+import Text "mo:core/Text";
+import Iter "mo:core/Iter";
+import Array "mo:core/Array";
+import Value "./Value";
 import Attributes "./Attributes";
 import Challenges "./Challenges";
 
@@ -68,7 +68,7 @@ module {
     /// bundle is either fully SSO (all keys `sso:<trusted-domain>:*`,
     /// same domain) or fully non-SSO (unscoped/openid). `ssoKeys` and
     /// `otherKeys` list the offending entries.
-    #MixedSsoSources : { ssoKeys : [Text]; otherKeys : [Text] };
+    #MixedSsoSources : { ssoKeys : [Text]; otherKeys : [Text] }
   };
 
   /// Five minutes in nanoseconds. Applied to the bundle's
@@ -88,34 +88,30 @@ module {
   public func verify<system>(store : Challenges.Store) : Result.Result<IdentityAttributes, Error> {
 
     let ?rawBundle = CallerAttributes.getAttributes<system>() else return #err(#NoAttributes);
-    let ?decoded   = Value.decode(rawBundle)                  else return #err(#MalformedCandid);
-    let ?attrs     = Attributes.fromValue(decoded)            else return #err(#MalformedCandid);
+    let ?decoded = Value.decode(rawBundle) else return #err(#MalformedCandid);
+    let ?attrs = Attributes.fromValue(decoded) else return #err(#MalformedCandid);
 
     let nowNs = Int.abs(Time.now());
 
-    let ?rawFrontendOrigins = Runtime.envVar<system>("frontend_origins")
-      else return #err(#FrontendOriginsNotConfigured);
+    let ?rawFrontendOrigins = Runtime.envVar<system>("frontend_origins") else return #err(#FrontendOriginsNotConfigured);
     let frontendOrigins = parseList(rawFrontendOrigins);
     if (frontendOrigins.size() == 0) return #err(#FrontendOriginsNotConfigured);
 
-    let ?gotOrigin = attrs.getText("implicit:origin")
-      else return #err(#MissingField "implicit:origin");
+    let ?gotOrigin = attrs.getText("implicit:origin") else return #err(#MissingField "implicit:origin");
     if (Array.find<Text>(frontendOrigins, func o = o == gotOrigin) == null) {
-      return #err(#FrontendOriginMismatch { expected = frontendOrigins; got = gotOrigin });
+      return #err(#FrontendOriginMismatch { expected = frontendOrigins; got = gotOrigin })
     };
 
-    let ?issuedAt = attrs.getNat("implicit:issued_at_timestamp_ns")
-      else return #err(#MissingField "implicit:issued_at_timestamp_ns");
+    let ?issuedAt = attrs.getNat("implicit:issued_at_timestamp_ns") else return #err(#MissingField "implicit:issued_at_timestamp_ns");
     if (nowNs >= issuedAt) {
       let age = nowNs - issuedAt : Nat;
-      if (age > maxAgeNs) return #err(#Stale { ageNs = age });
+      if (age > maxAgeNs) return #err(#Stale { ageNs = age })
     };
 
-    let ?bundleNonce = attrs.getBlob("implicit:nonce")
-      else return #err(#MissingField "implicit:nonce");
+    let ?bundleNonce = attrs.getBlob("implicit:nonce") else return #err(#MissingField "implicit:nonce");
     switch (Challenges.consume(store, bundleNonce)) {
       case (#err(#UnknownNonce)) return #err(#UnknownNonce);
-      case (#ok) {};
+      case (#ok) {}
     };
 
     // Optional — when unset, asIdentityAttributes treats every sso:*
@@ -124,15 +120,15 @@ module {
     // author opts in to SSO domains explicitly.
     let trustedSsoDomains = switch (Runtime.envVar<system>("trusted_sso_domains")) {
       case null [];
-      case (?raw) parseList(raw);
+      case (?raw) parseList(raw)
     };
 
     switch (Attributes.asIdentityAttributes(attrs, trustedSsoDomains)) {
       case (#err(#AmbiguousAttribute e)) #err(#AmbiguousAttribute e);
       case (#err(#UntrustedSsoSource e)) #err(#UntrustedSsoSource e);
-      case (#err(#MixedSsoSources e))    #err(#MixedSsoSources e);
-      case (#ok r)                       #ok r;
+      case (#err(#MixedSsoSources e)) #err(#MixedSsoSources e);
+      case (#ok r) #ok r
     }
   };
 
-};
+}

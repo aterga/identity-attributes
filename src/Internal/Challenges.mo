@@ -1,9 +1,9 @@
 import Random "mo:core/Random";
-import Map    "mo:core/Map";
-import Blob   "mo:core/Blob";
-import Time   "mo:core/Time";
-import Int    "mo:core/Int";
-import Iter   "mo:core/Iter";
+import Map "mo:core/Map";
+import Blob "mo:core/Blob";
+import Time "mo:core/Time";
+import Int "mo:core/Int";
+import Iter "mo:core/Iter";
 import Result "mo:core/Result";
 
 /// Single-use canister-issued nonces, held in a `Map<Blob, Int>` keyed
@@ -70,7 +70,7 @@ module {
     let nowNs = Int.abs(Time.now());
     pruneExpired(store, nowNs);
     if (Map.size(store) >= maxTotal) {
-      evictOldest(store);
+      evictOldest(store)
     };
     Map.add(store, Blob.compare, nonce, nowNs);
     nonce
@@ -85,7 +85,7 @@ module {
     pruneExpired(store, nowNs);
     switch (Map.take(store, Blob.compare, nonce)) {
       case (?_) #ok;
-      case null #err(#UnknownNonce);
+      case null #err(#UnknownNonce)
     }
   };
 
@@ -97,14 +97,14 @@ module {
       Iter.map<(Blob, Int), Blob>(
         Iter.filter<(Blob, Int)>(
           Map.entries(store),
-          func((_, issuedAt)) = nowNs - issuedAt > expiryNs,
+          func((_, issuedAt)) = nowNs - issuedAt > expiryNs
         ),
-        func((nonce, _)) = nonce,
+        func((nonce, _)) = nonce
       )
     );
     for (nonce in expired.vals()) {
-      Map.remove(store, Blob.compare, nonce);
-    };
+      Map.remove(store, Blob.compare, nonce)
+    }
   };
 
   // Remove the entry with the smallest `issuedAt`. Linear scan — only
@@ -115,13 +115,13 @@ module {
     for (entry in Map.entries(store)) {
       switch oldest {
         case null oldest := ?entry;
-        case (?(_, oldT)) if (entry.1 < oldT) oldest := ?entry;
-      };
+        case (?(_, oldT)) if (entry.1 < oldT) oldest := ?entry
+      }
     };
     switch oldest {
       case (?(nonce, _)) Map.remove(store, Blob.compare, nonce);
-      case null {};
-    };
+      case null {}
+    }
   };
 
-};
+}

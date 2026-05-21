@@ -49,7 +49,9 @@ module {
     /// the key is missing OR if the entry exists but isn't `Text`.
     public func getText(key : Text) : ?Text {
       for ((entryKey, value) in entries.vals()) {
-        if (entryKey == key) { switch value { case (#Text text) return ?text; case _ {} } };
+        if (entryKey == key) {
+          switch value { case (#Text text) return ?text; case _ {} }
+        }
       };
       null
     };
@@ -57,7 +59,9 @@ module {
     /// Exact-match lookup for a `Nat`-valued entry.
     public func getNat(key : Text) : ?Nat {
       for ((entryKey, value) in entries.vals()) {
-        if (entryKey == key) { switch value { case (#Nat nat) return ?nat; case _ {} } };
+        if (entryKey == key) {
+          switch value { case (#Nat nat) return ?nat; case _ {} }
+        }
       };
       null
     };
@@ -65,10 +69,12 @@ module {
     /// Exact-match lookup for a `Blob`-valued entry.
     public func getBlob(key : Text) : ?Blob {
       for ((entryKey, value) in entries.vals()) {
-        if (entryKey == key) { switch value { case (#Blob blob) return ?blob; case _ {} } };
+        if (entryKey == key) {
+          switch value { case (#Blob blob) return ?blob; case _ {} }
+        }
       };
       null
-    };
+    }
   };
 
   /// What `Verify.verify` hands back on success.
@@ -84,16 +90,16 @@ module {
   /// IdP behind `<domain>` attests the value, so there is no separate
   /// verification flag. The email's own domain may be anything.
   public type IdentityAttributes = {
-    name  : ?Text;
+    name : ?Text;
     email : ?Text;
-    sso   : ?Text;
+    sso : ?Text
   };
 
   /// A single logical field has more than one source in the bundle.
   /// `sources` lists the conflicting keys.
   public type AmbiguousAttribute = {
-    field   : Text;
-    sources : [Text];
+    field : Text;
+    sources : [Text]
   };
 
   /// All ways `asIdentityAttributes` can reject the bundle.
@@ -109,13 +115,13 @@ module {
     /// Either the unscoped/openid keys are present alongside SSO
     /// keys, or vice versa. `ssoKeys` and `otherKeys` list the
     /// offending entries.
-    #MixedSsoSources : { ssoKeys : [Text]; otherKeys : [Text] };
+    #MixedSsoSources : { ssoKeys : [Text]; otherKeys : [Text] }
   };
 
   /// Construct an `Attributes` from a decoded top-level `#Map`. Returns
   /// `null` if the value isn't a map.
   public func fromValue(value : Value) : ?Attributes {
-    switch value { case (#Map entries) ?Attributes(entries); case _ null };
+    switch value { case (#Map entries) ?Attributes(entries); case _ null }
   };
 
   // OpenID provider prefixes plus the empty unscoped prefix. `{tid}` in
@@ -125,7 +131,7 @@ module {
     "",
     "openid:https://accounts.google.com:",
     "openid:https://appleid.apple.com:",
-    "openid:https://login.microsoftonline.com/{tid}/v2.0:",
+    "openid:https://login.microsoftonline.com/{tid}/v2.0:"
   ];
 
   // Parse a key shaped `sso:<domain>:<suffix>`. Returns null if the
@@ -141,9 +147,7 @@ module {
 
   // Resolve one field across the unscoped/openid prefixes. Returns
   // null/one/error mirroring the pre-SSO behavior.
-  func resolveNonSsoField(attributes : Attributes, field : Text, suffix : Text)
-    : Result.Result<?Text, AmbiguousAttribute>
-  {
+  func resolveNonSsoField(attributes : Attributes, field : Text, suffix : Text) : Result.Result<?Text, AmbiguousAttribute> {
     var value : ?Text = null;
     var sources : [Text] = [];
     for (prefix in openidPrefixes.vals()) {
@@ -152,9 +156,9 @@ module {
         case null {};
         case (?v) {
           value := ?v;
-          sources := Array.concat<Text>(sources, [key]);
-        };
-      };
+          sources := Array.concat<Text>(sources, [key])
+        }
+      }
     };
     if (sources.size() > 1) #err({ field; sources }) else #ok(value)
   };
@@ -165,8 +169,8 @@ module {
     for (prefix in openidPrefixes.vals()) {
       for (suffix in (["name", "verified_email"] : [Text]).vals()) {
         let key = prefix # suffix;
-        if (attributes.has(key)) keys := Array.concat<Text>(keys, [key]);
-      };
+        if (attributes.has(key)) keys := Array.concat<Text>(keys, [key])
+      }
     };
     keys
   };
@@ -179,14 +183,14 @@ module {
   /// `#UntrustedSsoSource`.
   public func asIdentityAttributes(
     attributes : Attributes,
-    trustedSsoDomains : [Text],
+    trustedSsoDomains : [Text]
   ) : Result.Result<IdentityAttributes, Error> {
 
     // Scan for sso:<domain>:<suffix> keys, separating trusted from
     // untrusted and name from email. Any untrusted SSO source rejects
     // the bundle outright.
     var untrustedSsoDomain : ?Text = null;
-    var ssoNameSources  : [(Text, Text, Text)] = []; // (domain, key, value)
+    var ssoNameSources : [(Text, Text, Text)] = []; // (domain, key, value)
     var ssoEmailSources : [(Text, Text, Text)] = [];
 
     for ((key, value) in attributes.all().vals()) {
@@ -196,22 +200,22 @@ module {
           switch value {
             case (#Text v) {
               if (Array.find<Text>(trustedSsoDomains, func d = d == domain) == null) {
-                if (untrustedSsoDomain == null) untrustedSsoDomain := ?domain;
+                if (untrustedSsoDomain == null) untrustedSsoDomain := ?domain
               } else if (suffix == "name") {
-                ssoNameSources := Array.concat<(Text, Text, Text)>(ssoNameSources, [(domain, key, v)]);
+                ssoNameSources := Array.concat<(Text, Text, Text)>(ssoNameSources, [(domain, key, v)])
               } else if (suffix == "email") {
-                ssoEmailSources := Array.concat<(Text, Text, Text)>(ssoEmailSources, [(domain, key, v)]);
-              };
+                ssoEmailSources := Array.concat<(Text, Text, Text)>(ssoEmailSources, [(domain, key, v)])
+              }
             };
-            case _ {};
-          };
-        };
-      };
+            case _ {}
+          }
+        }
+      }
     };
 
     switch (untrustedSsoDomain) {
       case (?d) return #err(#UntrustedSsoSource { domain = d });
-      case null {};
+      case null {}
     };
 
     let hasSso = ssoNameSources.size() > 0 or ssoEmailSources.size() > 0;
@@ -224,9 +228,9 @@ module {
       let otherKeys = hasNonSsoNameOrEmail(attributes);
       if (otherKeys.size() > 0) {
         var ssoKeys : [Text] = [];
-        for ((_, k, _) in ssoNameSources.vals())  ssoKeys := Array.concat<Text>(ssoKeys, [k]);
+        for ((_, k, _) in ssoNameSources.vals()) ssoKeys := Array.concat<Text>(ssoKeys, [k]);
         for ((_, k, _) in ssoEmailSources.vals()) ssoKeys := Array.concat<Text>(ssoKeys, [k]);
-        return #err(#MixedSsoSources { ssoKeys; otherKeys });
+        return #err(#MixedSsoSources { ssoKeys; otherKeys })
       };
 
       // All SSO sources must share one domain. If name comes from
@@ -234,19 +238,19 @@ module {
       // to splice claims from two IdPs — reject.
       var domain : ?Text = null;
       var domainSources : [Text] = [];
-      for (src in ssoNameSources.vals())  {
+      for (src in ssoNameSources.vals()) {
         domainSources := Array.concat<Text>(domainSources, [src.1]);
         switch (domain) {
           case null { domain := ?src.0 };
-          case (?d0) if (src.0 != d0) return #err(#AmbiguousAttribute { field = "sso"; sources = domainSources });
-        };
+          case (?d0) if (src.0 != d0) return #err(#AmbiguousAttribute { field = "sso"; sources = domainSources })
+        }
       };
       for (src in ssoEmailSources.vals()) {
         domainSources := Array.concat<Text>(domainSources, [src.1]);
         switch (domain) {
           case null { domain := ?src.0 };
-          case (?d0) if (src.0 != d0) return #err(#AmbiguousAttribute { field = "sso"; sources = domainSources });
-        };
+          case (?d0) if (src.0 != d0) return #err(#AmbiguousAttribute { field = "sso"; sources = domainSources })
+        }
       };
 
       // Within the single domain, name and email each must have ≤ 1
@@ -254,29 +258,29 @@ module {
       if (ssoNameSources.size() > 1) {
         var sources : [Text] = [];
         for (src in ssoNameSources.vals()) sources := Array.concat<Text>(sources, [src.1]);
-        return #err(#AmbiguousAttribute { field = "name"; sources });
+        return #err(#AmbiguousAttribute { field = "name"; sources })
       };
       if (ssoEmailSources.size() > 1) {
         var sources : [Text] = [];
         for (src in ssoEmailSources.vals()) sources := Array.concat<Text>(sources, [src.1]);
-        return #err(#AmbiguousAttribute { field = "email"; sources });
+        return #err(#AmbiguousAttribute { field = "email"; sources })
       };
 
-      let nameVal  = if (ssoNameSources.size()  == 1) ?ssoNameSources[0].2  else null;
+      let nameVal = if (ssoNameSources.size() == 1) ?ssoNameSources[0].2 else null;
       let emailVal = if (ssoEmailSources.size() == 1) ?ssoEmailSources[0].2 else null;
-      return #ok { name = nameVal; email = emailVal; sso = domain };
+      return #ok { name = nameVal; email = emailVal; sso = domain }
     };
 
     // No SSO sources — fall through to the unscoped/openid resolution.
     let name = switch (resolveNonSsoField(attributes, "name", "name")) {
       case (#err e) return #err(#AmbiguousAttribute e);
-      case (#ok v)  v;
+      case (#ok v) v
     };
     let email = switch (resolveNonSsoField(attributes, "email", "verified_email")) {
       case (#err e) return #err(#AmbiguousAttribute e);
-      case (#ok v)  v;
+      case (#ok v) v
     };
     #ok { name; email; sso = null }
   };
 
-};
+}
