@@ -9,13 +9,14 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: release
 
     steps:
       - uses: actions/checkout@v6
       - uses: dfinity/setup-dfx@main # Currently required for `mops publish`
       - uses: caffeinelabs/setup-mops@v1
         with:
-          # Make sure you set the MOPS_IDENTITY_PEM secret in your repository settings https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-a-repository
+          # `MOPS_IDENTITY_PEM` is scoped to the `release` environment; see Settings → Environments.
           identity-pem: ${{ secrets.MOPS_IDENTITY_PEM }}
       - run: mops install
       - run: mops publish
